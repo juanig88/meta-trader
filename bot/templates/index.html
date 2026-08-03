@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="5" />
+    <title>MT5 Bot Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    {% set running = state.get("running", false) %}
+    {% set mode = state.get("mode", "n/a") %}
+    {% set pnl = state.get("pnl_today", 0.0) %}
+    {% set stale = health.get("heartbeat_stale", false) %}
+    {% set pid_alive = health.get("pid_alive") %}
+    {% set show_stale = stale or (running and (pid_alive is sameas false)) %}
+
+    {% if forward_ok %}
+    <div class="card" style="border-color:#166534;background:#0f1f14;">
+      <strong class="good">forward_metrics</strong> terminó bien. Se actualizó <span class="mono">forward_results.jsonl</span>.
+    </div>
+    {% endif %}
+    {% if forward_err %}
+    <div class="card warn">
+      <strong>forward_metrics</strong> no pudo completarse.
+      {% if forward_err == "missing_script" %}Falta <span class="mono">forward_metrics.py</span>.{% endif %}
+      {% if forward_err == "timeout" %}Timeout (120s). ¿MT5 colgado o sin red?{% endif %}
+      {% if forward_err == "os" %}No se pudo lanzar el subproceso.{% endif %}
+      {% if forward_err == "nonzero" %}Código de salida {{ forward_rc if forward_rc is not none else "?" }}. Revisá la consola donde corre Flask (stderr logueado).{% endif %}
+      Si el bot está usando Python+MT5 a la vez, probá ejecutar <span class="mono">py .\forward_metrics.py</span> en otra ventana cuando el bot esté parado.
+    </div>
+    {% endif %}
+
+    {% if telegram_test == "ok" %}
+    <div class="card" style="border-color:#166534;background:#0f1f14;">
+      <strong class="good">Telegram</strong>: mensaje de prueba enviado. Revisá el chat configurado en <span class="mono">TELEGRAM_CHAT_ID</span>.
+    </div>
+    {% endif %}
+    {% if telegram_test == "err" %}
+    <div class="card warn">
+      <strong>Telegram</strong>: no se pudo enviar el mensaje de prueba.
+      {% if telegram_test_msg %}<span class="mono" style="display:block;margin-top:6px;white-space:pre-wrap;">{{ telegram_test_msg }}</span>{% endif %}
+      Verificá <span class="mono">TELEGRAM_BOT_TOKEN</span>, <span class="mono">TELEGRAM_CHAT_ID</span> y que el bot esté iniciado en el chat.
+    </div>
+    {% endif %}
+
+    {% if show_stale %}
+    <div class="card warn">
+      <strong>Atención:</strong> el archivo <span class="mono">bot_state.json</span> puede estar desactualizado.
+      {% if stale %}El último heartbeat del bot es viejo ({{ health.get("heartbeat_age_sec") }}s).{% endif %}
+      {% if running and pid_alive is sameas false %}El PID {{ health.get("pid") }} no existe: el proceso ya no está corriendo.{% endif %}
+      Si cerraste el bot con Ctrl+C, recargá después de volver a ejecutar <span class="mono">py .\bot_mt5.py</span>.
+    </div>
+    {% endif %}
+
+    <div class="card header">
+      <div>
+        <h1>MT5 Bot Dashboard</h1>
+        <div class="muted">Última actualización: {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto refresh 5s)</div>
+        <div class="muted" style="margin-top:6px;">
+          <a href="/positions">Posiciones abiertas</a>
+          &nbsp;|&nbsp;
+          <a href="/journal">Journal</a>
+          &nbsp;|&nbsp;
+          <a href="/reports">Reportes JSONL →</a>
+          &nbsp;|&nbsp;
+          <a href="/backtests">Backtests</a>
+          &nbsp;|&nbsp;
+          <a href="/scans">Scans</a>
+          &nbsp;|&nbsp;
+          <a href="/portfolio">Portfolio</a>
+          &nbsp;|&nbsp;
+          <a href="/forward">Forward</a>
+        </div>
+      </div>
+      <div class="pill">{{ mode }}</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Estado</h2>
+        <div class="kv">
+          <div class="muted">Running</div>
+          <div class="{{ 'good' if running else 'bad' }}">{{ running }}</div>
+
+          <div class="muted">PnL hoy</div>
+          <div class="{{ 'good' if pnl >= 0 else 'bad' }}">{{ pnl }}</div>
+
+          <div class="muted">Open positions</div>
+          <div>{{ state.get("open_positions_total", "n/a") }}</div>
+
+          <div class="muted">Daily loss limit</div>
+          <div>{{ state.get("daily_loss_limit", "n/a") }}</div>
+
+          <div class="muted">Limit reached</div>
+          <div>{{ state.get("daily_loss_limit_reached", "n/a") }}</div>
+
+          {% set mll = state.get("monthly_loss_limit") or {} %}
+          {% if mll.get("enabled") %}
+          <div class="muted">6% Rule (mensual)</div>
+          <div class="mono">
+            {% if mll.get("month_start_balance") is not none %}
+              ${{ "%.2f"|format(mll.get("total_at_risk") or 0.0) }}
+              /
+              ${{ "%.2f"|format(mll.get("threshold_money") or 0.0) }}
+              ({{ "%.1f"|format(mll.get("pct") or 0.0) }}%
+              de ${{ "%.2f"|format(mll.get("month_start_balance") or 0.0) }})
+            {% else %}
+              (sin datos)
+            {% endif %}
+          </div>
+
+          <div class="muted">6% Rule alcanzado</div>
+          <div class="{{ 'bad' if state.get('monthly_loss_limit_reached') else 'good' }}">
+            {{ "SI — bloqueando nuevas entradas" if state.get("monthly_loss_limit_reached") else "no" }}
+          </div>
+          {% endif %}
+
+          <div class="muted">Bot heartbeat (JSON)</div>
+          <div class="mono">{{ state.get("ts", "—") }}</div>
+
+          <div class="muted">Edad heartbeat</div>
+          <div>{{ health.get("heartbeat_age_sec", "—") }}s</div>
+
+          <div class="muted">PID (bot)</div>
+          <div class="mono">{{ health.get("pid", "—") }}</div>
+
+          <div class="muted">¿Proceso vivo?</div>
+          <div>
+            {% if health.get("pid_alive") is none %}—{% elif health.get("pid_alive") %}<span class="good">sí</span>{% else %}<span class="bad">no</span>{% endif %}
+          </div>
+
+          {% if state.get("stop_reason") %}
+          <div class="muted">Último stop</div>
+          <div class="mono">{{ state.get("stop_reason") }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Last trade time</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Last trade</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% set symbols = state.get("symbols", []) %}
+            {% set last_trade_time = state.get("last_trade_time", {}) %}
+            {% if symbols %}
+              {% for sym in symbols %}
+                <tr>
+                  <td class="mono">{{ sym }}</td>
+                  <td class="mono">{{ last_trade_time.get(sym, "—") }}</td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="2" class="muted">No data (todavía no existe bot_state.json o el bot no está corriendo)</td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Régimen de mercado</h2>
+        <p class="muted" style="margin-top:0;">
+          Lectura pasiva (no hay push): se actualiza cuando el bot escribe <span class="mono">bot_state.json</span>.
+          <strong>Telegram</strong> sí avisa cuando el <em>régimen</em> cambia de categoría; acá ves el régimen actual y el merge sugerido.
+        </p>
+        {% set regimes = state.get("market_regimes") or {} %}
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Régimen</th>
+              <th>ADX M15</th>
+              <th>ADX H4</th>
+              <th>Actualizado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if regimes %}
+              {% for sym in regimes.keys()|sort %}
+                {% set r = regimes[sym] %}
+                  <tr>
+                    <td class="mono">{{ sym }}</td>
+                    <td>{{ r.get("regime", "—") }}</td>
+                    <td class="mono">{{ r.get("adx_m15", "—") }}</td>
+                    <td class="mono">{{ r.get("adx_h4", "—") }}</td>
+                    <td class="mono">{{ r.get("updated_at") or "—" }}</td>
+                  </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="5" class="muted">
+                  Todavía no hay datos (bot recién iniciado o <span class="mono">BOT_MARKET_REGIME_ENABLED=0</span>).
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+        {% if regimes %}
+          <div style="margin-top:14px;">
+            <h3 style="margin-bottom:8px;font-size:1rem;">Qué ajustar si querés alinear filtros al régimen</h3>
+            <p class="muted" style="margin-top:0;font-size:13px;">
+              El bot sigue usando tu <span class="mono">BOT_SYMBOL_CONFIG</span> hasta que edites y <strong>reinicies</strong>.
+              Debajo: merge sugerido solo de claves de filtro/tiempos (no toca EMA, SL/TP en points, spreads, etc.).
+            </p>
+            {% for sym in regimes.keys()|sort %}
+              {% set r = regimes[sym] %}
+              {% if r.get("suggested_config_patch_json") %}
+                <details style="margin-top:10px;border:1px solid #334155;border-radius:8px;padding:8px 12px;background:#0b1220;">
+                  <summary class="mono">{{ sym }} — {{ r.get("regime", "—") }}</summary>
+                  {% if r.get("hint_es") %}
+                    <p class="muted" style="margin:8px 0 6px;font-size:13px;line-height:1.4;">{{ r.get("hint_es") }}</p>
+                  {% endif %}
+                  <div class="muted" style="font-size:12px;margin-bottom:4px;">Merge en <span class="mono">BOT_SYMBOL_CONFIG["{{ sym }}"]</span>:</div>
+                  <pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:12px;color:#e5e7eb;">{{ r.get("suggested_config_patch_json") }}</pre>
+                </details>
+              {% endif %}
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if regime_export_text %}
+    <div class="card">
+      <h2>Exportar régimen para pegar en el chat</h2>
+      <p class="muted" style="margin-top:0;">
+        Incluye etiqueta de régimen por símbolo + <strong>PATCHES</strong> sugeridos (merge en <span class="mono">BOT_SYMBOL_CONFIG</span>).
+        También podés abrir
+        <a href="{{ url_for('export_market_regime') }}" target="_blank" rel="noopener noreferrer"><span class="mono">/export/market-regime</span></a>
+        (texto solo) para copiar desde ahí.
+      </p>
+      <textarea
+        id="regime-export-box"
+        readonly
+        rows="18"
+        style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px;padding:10px;border-radius:8px;border:1px solid #334155;background:#0b1220;color:#e5e7eb;resize:vertical;"
+      >{{ regime_export_text }}</textarea>
+      <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+        <button
+          type="button"
+          id="regime-export-copy"
+          style="padding:6px 12px;border-radius:8px;border:1px solid #334155;background:#1e3a5f;color:#e5e7eb;cursor:pointer;"
+        >
+          Copiar al portapapeles
+        </button>
+        <span class="muted" id="regime-export-copy-msg" style="font-size:13px;display:none;"></span>
+      </div>
+      <script>
+        (function () {
+          var btn = document.getElementById("regime-export-copy");
+          var box = document.getElementById("regime-export-box");
+          var msg = document.getElementById("regime-export-copy-msg");
+          if (!btn || !box) return;
+          btn.addEventListener("click", async function () {
+            try {
+              await navigator.clipboard.writeText(box.value);
+              if (msg) {
+                msg.style.display = "inline";
+                msg.textContent = "Listo — pegalo en Cursor / Telegram / archivo.";
+                setTimeout(function () {
+                  msg.style.display = "none";
+                  msg.textContent = "";
+                }, 4000);
+              }
+              btn.textContent = "Copiado ✓";
+              setTimeout(function () {
+                btn.textContent = "Copiar al portapapeles";
+              }, 2500);
+            } catch (e) {
+              box.focus();
+              box.select();
+              try {
+                document.execCommand("copy");
+              } catch (ignored) {}
+            }
+          });
+        })();
+      </script>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>Forward (último snapshot)</h2>
+      {% if forward_latest %}
+        <div class="muted" style="margin-bottom:10px;">
+          Fuente: última entrada de <span class="mono">forward_results.jsonl</span> ·
+          <a href="/forward">tabla completa →</a>
+        </div>
+        <div class="kv">
+          <div class="muted">ts</div>
+          <div class="mono">{{ forward_latest.get("ts", "—") }}</div>
+          <div class="muted">Ventana (días)</div>
+          <div class="mono">{{ forward_latest.get("days", "—") }} · {{ forward_latest.get("window_start", "") }} → {{ forward_latest.get("window_end", "") }}</div>
+          <div class="muted">Símbolos / magic</div>
+          <div class="mono">{{ (forward_latest.get("symbols") or [])|join(",") }} · magic={{ forward_latest.get("magic", "—") }}</div>
+          <div class="muted">Deals / outs</div>
+          <div class="mono">{{ forward_latest.get("deals_matched", "—") }} / {{ forward_latest.get("deals_out_matched", "—") }}</div>
+          <div class="muted">Outs/día · PnL · WR outs</div>
+          <div class="mono">
+            {{ forward_latest.get("outs_per_day", "—") }} ·
+            <span class="{{ 'good' if (forward_latest.get('pnl_total') or 0) >= 0 else 'bad' }}">{{ forward_latest.get("pnl_total", "—") }}</span> ·
+            {{ forward_latest.get("winrate_out_deals", "—") }}
+          </div>
+          <div class="muted">Baseline BT trades/día</div>
+          <div class="mono">{{ forward_latest.get("trades_per_day_backtest", "—") }}</div>
+          <div class="muted">Opens con spread (log)</div>
+          <div class="mono">{{ forward_latest.get("opens_log", "—") }}</div>
+        </div>
+      {% else %}
+        <p class="muted">Todavía no hay filas en <span class="mono">forward_results.jsonl</span>. Podés generar una corrida abajo o con <span class="mono">py .\forward_metrics.py</span>.</p>
+      {% endif %}
+      <form method="post" action="{{ url_for('forward_run') }}" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+        <label class="muted">Ventana (días) <input type="number" name="days" value="14" min="1" max="366" style="width:4.5rem;padding:4px 6px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e5e7eb;" /></label>
+        <button type="submit" style="padding:6px 12px;border-radius:8px;border:1px solid #334155;background:#1e3a5f;color:#e5e7eb;cursor:pointer;">Ejecutar forward_metrics</button>
+        <span class="muted" style="font-size:12px;">Requiere MT5 y <span class="mono">.env</span>. Puede interferir si el bot ya usa MT5 desde Python.</span>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Telegram (prueba)</h2>
+      <p class="muted" style="margin-top:0;">
+        Usa las mismas variables que el bot: <span class="mono">TELEGRAM_BOT_TOKEN</span> y <span class="mono">TELEGRAM_CHAT_ID</span> en <span class="mono">.env</span>.
+        El bot <strong>no te escribe</strong> el chat id: primero enviá <span class="mono">/start</span> al bot en Telegram, después
+        <a href="{{ url_for('telegram_chat_list') }}">abrí la lista de chat_id (getUpdates)</a>
+        o ejecutá <span class="mono">py .\get_telegram_chat_id.py</span>. En privado suele coincidir con el id que muestra <strong>@userinfobot</strong>.
+      </p>
+      <form method="post" action="{{ url_for('telegram_test') }}" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+        <label class="muted" style="flex:1;min-width:220px;">
+          Texto (opcional)
+          <input type="text" name="text" maxlength="500" placeholder="Si vacío, se envía un mensaje por defecto" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e5e7eb;" />
+        </label>
+        <button type="submit" style="padding:6px 12px;border-radius:8px;border:1px solid #334155;background:#1e3a5f;color:#e5e7eb;cursor:pointer;">Enviar mensaje de prueba</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Archivos</h2>
+      <div class="muted">
+        - El bot escribe <span class="mono">bot_state.json</span><br />
+        - Logs estructurados en <span class="mono">trades.log</span><br /><br />
+        <strong>Validar en consola (PowerShell):</strong><br />
+        <span class="mono">Get-Process python* | Where-Object Id -eq (Get-Content .\bot_state.json | ConvertFrom-Json).pid</span>
+      </div>
+    </div>
+  </body>
+</html>
+

@@ -1,0 +1,141 @@
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  margin: 24px;
+  background: #0b1220;
+  color: #e5e7eb;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.card {
+  background: #0f172a;
+  border: 1px solid #1f2a44;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+h1 {
+  margin: 0 0 10px 0;
+  font-size: 18px;
+}
+
+h2 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #cbd5e1;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 8px 12px;
+}
+
+.pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #111827;
+  border: 1px solid #1f2a44;
+  color: #e5e7eb;
+  white-space: nowrap;
+}
+
+.good {
+  color: #16a34a;
+}
+
+.bad {
+  color: #dc2626;
+}
+
+.warn {
+  border-color: #b45309;
+  background: #1c1410;
+  color: #fed7aa;
+  line-height: 1.5;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #1f2a44;
+  text-align: left;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.backtest-extra td {
+  background: #080d18;
+  border-bottom: 1px solid #1f2a44;
+  padding: 0 8px 12px 8px;
+  vertical-align: top;
+}
+
+.backtest-details {
+  margin: 8px 0 4px 0;
+}
+
+.backtest-details summary {
+  cursor: pointer;
+  user-select: none;
+  color: #94a3b8;
+  font-size: 13px;
+  padding: 8px 0;
+  list-style: none;
+}
+
+.backtest-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.backtest-details summary::before {
+  content: "▸ ";
+  color: #64748b;
+}
+
+.backtest-details[open] summary::before {
+  content: "▾ ";
+}
+
+.backtest-json {
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: auto;
+  max-height: 320px;
+  background: #111827;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #1f2a44;
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+

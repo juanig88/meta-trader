@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="10" />
+    <title>Posiciones abiertas · MT5 Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>Posiciones abiertas</h1>
+        <div class="muted">Snapshot en vivo desde MetaTrader5 · {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto refresh 10s)</div>
+        <div class="muted" style="margin-top:6px;">
+          <a href="/">← Dashboard</a>
+          {% if symbols_filter %}
+          &nbsp;|&nbsp; Filtrando por símbolos del bot:
+          <span class="mono">{{ symbols_filter | join(", ") }}</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="pill">{{ positions | length }} abiertas</div>
+    </div>
+
+    {% if not ok %}
+    <div class="card warn">
+      <strong>No se pudieron leer posiciones desde MT5.</strong>
+      {% if error %}<div class="mono" style="margin-top:6px;white-space:pre-wrap;">{{ error }}</div>{% endif %}
+      <div class="muted" style="margin-top:8px;">
+        Causas frecuentes: terminal MT5 cerrado, credenciales en <span class="mono">.env</span> (<span class="mono">MT5_LOGIN/MT5_PASSWORD/MT5_SERVER</span>) faltantes, o
+        conflicto porque otro proceso Python ya tiene el token de MT5. Este dashboard abre su propia sesión de solo lectura; asegurate de que el terminal esté abierto.
+      </div>
+    </div>
+    {% else %}
+
+    {% if account %}
+    <div class="card">
+      <h2>Cuenta</h2>
+      <div class="kv">
+        <div class="muted">Login</div>
+        <div class="mono">{{ account['login'] }}</div>
+        <div class="muted">Nombre</div>
+        <div>{{ account['name'] }}</div>
+        <div class="muted">Servidor</div>
+        <div class="mono">{{ account['server'] }}</div>
+        <div class="muted">Moneda</div>
+        <div class="mono">{{ account['currency'] }}</div>
+        <div class="muted">Balance</div>
+        <div class="mono">{{ "%.2f"|format(account['balance']) }}</div>
+        <div class="muted">Equity</div>
+        <div class="mono">{{ "%.2f"|format(account['equity']) }}</div>
+        <div class="muted">Margen usado</div>
+        <div class="mono">{{ "%.2f"|format(account['margin']) }}</div>
+        <div class="muted">Margen libre</div>
+        <div class="mono">{{ "%.2f"|format(account['margin_free']) }}</div>
+        <div class="muted">PnL flotante</div>
+        <div class="mono {{ 'good' if account['profit'] >= 0 else 'bad' }}">{{ "%.2f"|format(account['profit']) }}</div>
+        <div class="muted">Margin level</div>
+        <div class="mono">
+          {% if account['margin_level'] is none %}
+            <span class="muted">— (sin posiciones con margen)</span>
+          {% else %}
+            {% set ms = account['margin_status'] %}
+            {% set cls = 'good' if ms == 'ok' else ('' if ms == 'caution' else 'bad') %}
+            <span class="{{ cls }}">{{ "%.0f"|format(account['margin_level']) }}%</span>
+            {% if ms == 'critical' %}
+              <span class="bad">· CRÍTICO: muy cerca del stop-out</span>
+            {% elif ms == 'warn' %}
+              <span class="bad">· margin-call activo</span>
+            {% elif ms == 'caution' %}
+              <span class="muted">· prudente pero &lt;300%</span>
+            {% endif %}
+          {% endif %}
+        </div>
+        {% if account['margin_so_call'] or account['margin_so_so'] %}
+        <div class="muted">Umbrales broker</div>
+        <div class="mono muted">
+          {% if account['margin_so_call'] %}margin-call {{ "%.0f"|format(account['margin_so_call']) }}%{% endif %}
+          {% if account['margin_so_call'] and account['margin_so_so'] %} · {% endif %}
+          {% if account['margin_so_so'] %}stop-out {{ "%.0f"|format(account['margin_so_so']) }}%{% endif %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="muted" style="margin-top:8px; font-size:0.92em;">
+        <strong>Margin level</strong> = equity / margen usado × 100. Interpretación rápida:
+        <span class="good">&gt;300%</span> holgado · <span class="muted">100-300%</span> prudente ·
+        <span class="bad">&lt; margin-call</span> riesgo de que el broker rechace entradas o cierre posiciones.
+      </div>
+    </div>
+    {% endif %}
+
+    {% if group_exposure %}
+    <div class="card">
+      <h2>Exposición por grupo de correlación</h2>
+      <div class="muted" style="margin-bottom:6px;">
+        Cuando un grupo llega al cap, el bot bloquea nuevas entradas en cualquier símbolo del grupo
+        (evento <span class="mono">CORRELATION_SKIP</span> en el log). Editá los grupos en
+        <span class="mono">BOT_CORRELATION_GROUPS</span> / <span class="mono">BOT_MAX_POSITIONS_PER_GROUP</span>.
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Grupo</th>
+            <th>Miembros</th>
+            <th>Abiertas</th>
+            <th>Cap</th>
+            <th>Símbolos con posición</th>
+            <th>PnL grupo</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for g in group_exposure %}
+          <tr>
+            <td class="mono">{{ g.group }}</td>
+            <td class="mono muted">{{ g.members | join(", ") }}</td>
+            <td class="mono">{{ g.open_count }}</td>
+            <td class="mono">{% if g.cap > 0 %}{{ g.cap }}{% else %}—{% endif %}</td>
+            <td class="mono">{% if g.symbols_open %}{{ g.symbols_open | join(", ") }}{% else %}—{% endif %}</td>
+            <td class="mono {{ 'good' if g.net >= 0 else 'bad' }}">{{ "%.2f"|format(g.net) }}</td>
+            <td>
+              {% if g.cap <= 0 %}
+                <span class="muted">disabled</span>
+              {% elif g.blocked %}
+                <span class="bad">BLOQUEADO</span>
+              {% elif g.open_count == 0 %}
+                <span class="muted">libre</span>
+              {% else %}
+                <span class="good">ok ({{ g.open_count }}/{{ g.cap }})</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>Abiertas</h2>
+      {% if positions %}
+      <table>
+        <thead>
+          <tr>
+            <th>Ticket</th>
+            <th>Símbolo</th>
+            <th>Side</th>
+            <th>Lot</th>
+            <th>Entrada</th>
+            <th>Precio</th>
+            <th>SL</th>
+            <th>TP</th>
+            <th>Swap</th>
+            <th>PnL</th>
+            <th>Magic</th>
+            <th>Gestión</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in positions %}
+          {% set digits = p.digits or 2 %}
+          {% set fmt = "%." ~ digits ~ "f" %}
+          <tr>
+            <td class="mono">{{ p.ticket }}</td>
+            <td class="mono">{{ p.symbol }}</td>
+            <td class="{{ 'good' if p.side == 'BUY' else 'bad' }}">{{ p.side }}</td>
+            <td class="mono">{{ "%g"|format(p.volume) }}</td>
+            <td class="mono">{{ fmt|format(p.price_open) }}</td>
+            <td class="mono">{% if p.price_current is not none %}{{ fmt|format(p.price_current) }}{% else %}—{% endif %}</td>
+            <td class="mono">{% if p.sl %}{{ fmt|format(p.sl) }}{% else %}—{% endif %}</td>
+            <td class="mono">{% if p.tp %}{{ fmt|format(p.tp) }}{% else %}—{% endif %}</td>
+            <td class="mono">{{ "%.2f"|format(p.swap) }}</td>
+            <td class="mono {{ 'good' if p.profit >= 0 else 'bad' }}">{{ "%.2f"|format(p.profit) }}</td>
+            <td class="mono">{{ p.magic }}</td>
+            <td>
+              {% if p.managed_by_bot %}
+                <span class="good">bot</span>
+              {% else %}
+                <span class="muted">externa</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="9" style="text-align:right;" class="muted">Total flotante (PnL + swap):</td>
+            <td class="mono {{ 'good' if total_profit >= 0 else 'bad' }}">{{ "%.2f"|format(total_profit) }}</td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
+      </table>
+      {% else %}
+      <div class="muted">Sin posiciones abiertas en los símbolos del bot.</div>
+      {% endif %}
+    </div>
+
+    {% endif %}
+  </body>
+</html>

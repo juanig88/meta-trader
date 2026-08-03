@@ -1,0 +1,16 @@
+{
+  "name": "meta-trader",
+  "version": "1.0.0",
+  "description": "Bot de trading para **MetaTrader 5** usando la librería oficial `MetaTrader5` (Python).   Se ejecuta en tu PC con MT5 abierto y logueado.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
