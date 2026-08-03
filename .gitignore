@@ -1,0 +1,7 @@
+.env
+.env-old
+bot_state.json
+trades.log
+trades_watcher.log
+Files/
+logs/
