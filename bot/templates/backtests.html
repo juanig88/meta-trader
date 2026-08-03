@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="10" />
+    <title>Backtests - MT5 Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>Backtests</h1>
+        <div class="muted">Última actualización: {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto refresh 10s)</div>
+        <div class="muted">
+          <a href="/">← Dashboard</a>
+          &nbsp;|&nbsp;
+          <a href="/reports">Reportes JSONL</a>
+        </div>
+        <div class="muted" style="margin-top:6px;">
+          <span class="mono">archivo:</span>
+          <form method="get" action="/backtests" style="display:inline;">
+            <input type="hidden" name="sort" value="{{ sort }}" />
+            <select name="file" onchange="this.form.submit()">
+              {% for f in files %}
+                <option value="{{ f }}" {% if f == filename %}selected{% endif %}>{{ f }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </div>
+      </div>
+      <div class="pill">sort={{ sort }}</div>
+    </div>
+
+    {% if not file_exists %}
+    <div class="card warn">
+      <strong>No existe</strong> <span class="mono">{{ filename }}</span> todavía.
+      Corré al menos un backtest para generar resultados:
+      <div class="mono" style="margin-top:10px;">py .\backtest.py --symbols EURUSD,GBPUSD --days 180 --sl 80 --tp 100 --spread 20</div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>Ranking (tabla)</h2>
+      <div class="muted">
+        - <strong>score</strong> = pnl_points + max_drawdown_points (DD es negativo, así que penaliza).<br />
+        - <strong>score_money</strong> = pnl_money + max_drawdown_money (DD $ es negativo).<br />
+        - Filas sin columna <span class="mono">pnl_money</span> en el JSONL son corridas viejas (solo puntos).<br />
+        - Corridas con <span class="mono">--extended-stats</span> / <span class="mono">--benchmark</span>: desplegable <strong>Métricas extendidas…</strong> debajo de la fila.<br />
+        - Click en encabezados para ordenar.
+      </div>
+      <div style="overflow:auto; margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th><a href="/backtests?sort=score&file={{ filename }}">score</a></th>
+              <th><a href="/backtests?sort=pnl&file={{ filename }}">pnl_points</a></th>
+              <th><a href="/backtests?sort=dd&file={{ filename }}">max_dd_points</a></th>
+              <th><a href="/backtests?sort=score_money&file={{ filename }}">score_money</a></th>
+              <th><a href="/backtests?sort=pnl_money&file={{ filename }}">pnl_money</a></th>
+              <th><a href="/backtests?sort=dd_money&file={{ filename }}">max_dd_money</a></th>
+              <th class="mono">initial</th>
+              <th class="mono">final</th>
+              <th class="mono">lot</th>
+              <th class="mono">lot_mode</th>
+              <th class="mono">risk_pct</th>
+              <th><a href="/backtests?sort=winrate&file={{ filename }}">winrate</a></th>
+              <th><a href="/backtests?sort=trades&file={{ filename }}">trades</a></th>
+              <th>symbol</th>
+              <th>sl/tp/spread</th>
+              <th>ema</th>
+              <th>adx</th>
+              <th>range</th>
+              <th>ts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if rows %}
+              {% for r in rows %}
+                {% set pnl = r.get("_pnl", 0.0) %}
+                {% set dd = r.get("_dd", 0.0) %}
+                {% set score = r.get("_score", 0.0) %}
+                {% set hasm = r.get('_has_money', false) %}
+                {% set pnlm = r.get("_pnl_money") %}
+                {% set ddm = r.get("_dd_money") %}
+                {% set scorem = r.get("_score_money") %}
+                <tr>
+                  <td class="mono {{ 'good' if score >= 0 else 'bad' }}">{{ '%.2f'|format(score) }}</td>
+                  <td class="mono {{ 'good' if pnl >= 0 else 'bad' }}">{{ '%.2f'|format(pnl) }}</td>
+                  <td class="mono bad">{{ '%.2f'|format(dd) }}</td>
+                  {% if hasm %}
+                  <td class="mono {{ 'good' if scorem >= 0 else 'bad' }}">{{ '%.2f'|format(scorem) }}</td>
+                  <td class="mono {{ 'good' if pnlm >= 0 else 'bad' }}">{{ '%.2f'|format(pnlm) }}</td>
+                  <td class="mono bad">{{ '%.2f'|format(ddm) }}</td>
+                  <td class="mono">{{ '%.2f'|format(r.get('initial_balance', 0.0)) }}</td>
+                  <td class="mono">{{ '%.2f'|format(r.get('final_balance', 0.0)) }}</td>
+                  <td class="mono">{{ '%.4f'|format(r.get('lot', 0.0)) if r.get('lot') is not none else '' }}</td>
+                  <td class="mono">{{ r.get('lot_mode', '') }}</td>
+                  <td class="mono">{{ r.get('risk_per_trade_pct', '') }}</td>
+                  {% else %}
+                  <td class="muted" colspan="8">—</td>
+                  {% endif %}
+                  <td class="mono">{{ '%.2f'|format(r.get('winrate', 0.0)) }}%</td>
+                  <td class="mono">{{ r.get('trades', 0) }}</td>
+                  <td class="mono">{{ r.get('symbol', '') }}</td>
+                  <td class="mono">
+                    SL {{ r.get('sl_points', '') }} | TP {{ r.get('tp_points', '') }} | spr {{ r.get('spread_points', '') }}
+                  </td>
+                  <td class="mono">{{ r.get('ema_fast', '') }}/{{ r.get('ema_slow', '') }}</td>
+                  <td class="mono">p{{ r.get('adx_period', '') }} ≥ {{ r.get('adx_min', '') }}</td>
+                  <td class="mono">{{ r.get('start', '') }} → {{ r.get('end', '') }}</td>
+                  <td class="mono">{{ r.get('ts', '') }}</td>
+                </tr>
+                {% if r.get('extended_stats') or r.get('benchmark_buy_hold') or r.get('stat_validation') %}
+                <tr class="backtest-extra">
+                  <td colspan="19">
+                    <details class="backtest-details">
+                      <summary>Métricas extendidas, validación y benchmark</summary>
+                      <div class="grid" style="margin-top:8px;">
+                        <div>
+                          {% if r.get('extended_stats') %}
+                          <h3 style="font-size:12px;margin:0 0 8px 0;color:#94a3b8;">extended_stats</h3>
+                          <div class="kv">
+                            {% for k, v in r.extended_stats.items() %}
+                            <span class="muted">{{ k }}</span>
+                            <span class="mono">{{ v }}</span>
+                            {% endfor %}
+                          </div>
+                          {% else %}
+                          <span class="muted">Sin <span class="mono">extended_stats</span> (correr backtest con <span class="mono">--extended-stats 1</span>).</span>
+                          {% endif %}
+                        </div>
+                        <div>
+                          {% if r.get('benchmark_buy_hold') %}
+                          <h3 style="font-size:12px;margin:0 0 8px 0;color:#94a3b8;">benchmark_buy_hold</h3>
+                          <pre class="backtest-json">{{ r.benchmark_buy_hold | tojson(indent=2) | safe }}</pre>
+                          {% else %}
+                          <span class="muted">Sin <span class="mono">benchmark_buy_hold</span> (correr con <span class="mono">--benchmark auto</span> o ticker yfinance).</span>
+                          {% endif %}
+                        </div>
+                      </div>
+                      {% if r.get('stat_validation') %}
+                      <div style="margin-top:14px;">
+                        <h3 style="font-size:12px;margin:0 0 8px 0;color:#94a3b8;">stat_validation</h3>
+                        <pre class="backtest-json">{{ r.stat_validation | tojson(indent=2) | safe }}</pre>
+                      </div>
+                      {% endif %}
+                    </details>
+                  </td>
+                </tr>
+                {% endif %}
+              {% endfor %}
+            {% else %}
+              <tr><td colspan="19" class="muted">Sin resultados todavía.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>
+

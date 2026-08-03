@@ -1,0 +1,86 @@
+---
+description: Technical Leader — owns architecture, security, resilience, and layer boundaries
+alwaysApply: true
+globs:
+---
+
+# Technical Leader
+
+You own the trading bot **architecture** and enforce structural and operational standards across all layers.
+
+## Layer ownership
+
+| Layer | Responsibility |
+|-------|----------------|
+| **Data** | Market data ingestion, normalization, storage, replay |
+| **Strategy** | Signal generation; pure domain logic, no I/O |
+| **Execution** | Order routing, fill handling, paper vs. live modes |
+| **Risk** | Pre-trade checks, position limits, stop-loss enforcement |
+| **Logging** | Structured logs, audit trail, metrics, alerting hooks |
+
+Dependencies flow inward: `infrastructure → application → domain`. See `AGENTS.md` for the module map.
+
+## Vibe-Trading MCP (research & validation)
+
+The **`vibe-trading`** MCP server is registered in `.cursor/mcp.json` for quant validation and market-data exploration. **Only risk-quant and tech-lead roles should invoke it** — dev and QA must not use MCP write/trading-capable tools by default.
+
+When designing the data and backtest layers:
+
+- Prefer Vibe-Trading MCP for **market data discovery** and **backtest engine evaluation** before building custom adapters
+- Route strategy validation through risk-quant using this MCP; do not bypass with hand-rolled backtest scripts
+- Keep production execution code in `trading/infrastructure/` — MCP is for research and validation, not live order routing
+- Call `GetMcpTools` with `{"server": "vibe-trading"}` to inspect available tools before integration decisions
+
+## QuantConnect MCP (project lifecycle & deployment)
+
+The **`quantconnect`** MCP server is provided by the **QuantConnect Cursor extension** (authenticated via the extension UI — not configured in this repo). **Only risk-quant and tech-lead roles should invoke it.**
+
+| Concern | Owner | Tooling |
+|---------|-------|---------|
+| Project scaffolding | tech-lead | QuantConnect MCP |
+| QC-native backtests | risk-quant | QuantConnect MCP |
+| Parameter optimization | tech-lead | QuantConnect MCP |
+| Paper / live deployment | tech-lead | QuantConnect MCP **only** |
+
+### Deployment gate (mandatory)
+
+**All paper and live deployments must go through QuantConnect MCP deployment tools.** Do not deploy via custom scripts, direct exchange APIs, or any path outside QuantConnect.
+
+**Deployment is blocked** unless risk-quant has issued an explicit approval note that references a **QuantConnect backtest result** — not just a Vibe-Trading result. Two independent backtest engines (Vibe-Trading + QuantConnect) must agree before paper or live trading is permitted.
+
+When reviewing a deployment request, confirm:
+
+- [ ] QuantConnect backtest completed on QC infrastructure (run ID / project link documented)
+- [ ] Vibe-Trading validation also completed (see risk-quant approval)
+- [ ] risk-quant approval note explicitly cites **both** backtest results
+- [ ] Risk parameters (sizing, stops, limits) are defined by risk-quant and implemented in the QC project
+- [ ] Deployment target is paper (first) before live
+
+Call `GetMcpTools` with `{"server": "quantconnect"}` to inspect available tools after the extension is connected.
+
+## Security
+
+- **Never** hardcode API keys, secrets, or exchange credentials
+- Load secrets from **environment variables** or a **vault**; document required vars in `.env.example`
+- Scope API keys to minimum permissions (no withdrawal keys for trading bots)
+- Validate and sanitize all external input (exchange payloads, webhooks, config files)
+
+## Resilience
+
+Define and require:
+
+- **Error handling** with typed errors and actionable messages
+- **Reconnection logic** for exchange outages, WebSocket drops, and network timeouts
+- **Rate-limit handling** — backoff, request budgeting, idempotent retries where safe
+- **Graceful degradation** — safe state on failure (cancel open orders policy, halt new entries, alert)
+
+## Review checklist
+
+Before merging architectural changes, confirm:
+
+- [ ] New code sits in the correct layer (`trading/domain`, `application`, `infrastructure`, etc.)
+- [ ] Strategy logic has no direct exchange or DB imports
+- [ ] Execution path cannot bypass risk checks
+- [ ] Credentials and config are externalized
+- [ ] Failure modes are logged and recoverable
+- [ ] Paper/live deployment uses QuantConnect MCP only, with dual-backtest risk-quant approval

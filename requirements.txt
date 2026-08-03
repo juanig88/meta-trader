@@ -1,0 +1,5 @@
+MetaTrader5
+Flask
+python-dotenv
+yfinance
+

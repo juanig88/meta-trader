@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "vibe-trading": {
+      "command": "vibe-trading-mcp",
+      "args": []
+    },
+    "context7": {
+      "command": "context7-mcp",
+      "args": []
+    }
+  }
+}

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="15" />
+    <title>Forward metrics - MT5 Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>Forward metrics (MT5 + log)</h1>
+        <div class="muted">Última actualización: {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto refresh 15s)</div>
+        <div class="muted" style="margin-top:6px;">
+          <a href="/">← Dashboard</a>
+          &nbsp;|&nbsp;
+          <a href="/reports">Reportes JSONL</a>
+        </div>
+      </div>
+      <div class="pill mono">{{ filename }}</div>
+    </div>
+
+    {% if not file_exists %}
+    <div class="card warn">
+      <strong>No existe</strong> <span class="mono">{{ filename }}</span>.
+      Ejemplo:
+      <div class="mono" style="margin-top:10px;">py .\forward_metrics.py --days 14 --log-trades trades.log --out forward_results.jsonl</div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>Snapshots (más recientes primero)</h2>
+      <div style="overflow:auto; margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th class="mono">ts</th>
+              <th class="mono">days</th>
+              <th class="mono">window</th>
+              <th class="mono">magic</th>
+              <th class="mono">symbols</th>
+              <th class="mono">deals</th>
+              <th class="mono">outs</th>
+              <th class="mono">outs/día</th>
+              <th class="mono">PnL</th>
+              <th class="mono">WR outs</th>
+              <th class="mono">baseline BT/día</th>
+              <th class="mono">log opens</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if rows %}
+              {% for r in rows %}
+                {% set syms = r.get("symbols") or [] %}
+                {% set b = r.get("baseline") or {} %}
+                <tr>
+                  <td class="mono">{{ r.get("ts", "") }}</td>
+                  <td class="mono">{{ r.get("days", "") }}</td>
+                  <td class="mono" style="max-width:200px;white-space:normal;">{{ r.get("window_start", "") }}<br />→ {{ r.get("window_end", "") }}</td>
+                  <td class="mono">{{ r.get("magic", "") }}</td>
+                  <td class="mono">{{ syms | join(",") }}</td>
+                  <td class="mono">{{ r.get("deals_matched", "") }}</td>
+                  <td class="mono">{{ r.get("deals_out_matched", "") }}</td>
+                  <td class="mono">{{ "%.4f"|format(r.get("outs_per_day", 0)|float) }}</td>
+                  <td class="mono {{ 'good' if (r.get('pnl_total', 0)|float) >= 0 else 'bad' }}">{{ "%.4f"|format(r.get("pnl_total", 0)|float) }}</td>
+                  <td class="mono">{{ "%.4f"|format(r.get("winrate_out_deals", 0)|float) }}</td>
+                  <td class="mono">
+                    {% if b.get("trades_per_day_backtest") is not none %}
+                      {{ "%.4f"|format(b.get("trades_per_day_backtest")|float) }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                  <td class="mono">{{ (r.get("from_log") or {}).get("opens_matched", "—") }}</td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr><td colspan="12" class="muted">Sin filas parseables.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Detalle última fila (JSON)</h2>
+      {% if latest_pretty %}
+        <pre class="mono muted" style="white-space:pre-wrap;word-break:break-all;font-size:11px;margin:0;">{{ latest_pretty | safe }}</pre>
+      {% else %}
+        <p class="muted">Nada que mostrar.</p>
+      {% endif %}
+    </div>
+  </body>
+</html>

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="15" />
+    <title>Reportes JSONL - MT5 Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>Reportes JSONL</h1>
+        <div class="muted">Última actualización: {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto refresh 15s)</div>
+        <div class="muted" style="margin-top:6px;">
+          <a href="/">← Dashboard</a>
+        </div>
+      </div>
+      <div class="pill">archivos locales</div>
+    </div>
+
+    <div class="card">
+      <h2>Tablas</h2>
+      <p class="muted">Cada enlace abre la tabla correspondiente. Los conteos son líneas no vacías en el JSONL.</p>
+      <div style="overflow:auto; margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Reporte</th>
+              <th>Archivo</th>
+              <th class="mono">líneas</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for it in items %}
+              <tr>
+                <td><a href="{{ it.url }}">{{ it.label }}</a></td>
+                <td class="mono">{{ it.filename }}</td>
+                <td class="mono">{{ it.lines }}</td>
+                <td>
+                  {% if it.exists %}
+                    <span class="good">ok</span>
+                  {% else %}
+                    <span class="muted">sin archivo</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

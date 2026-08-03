@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="30" />
+    <title>Journal · MT5 Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <style>
+      .sev-high { color:#fca5a5; border-left:3px solid #dc2626; padding-left:10px; margin:6px 0; }
+      .sev-medium { color:#fcd34d; border-left:3px solid #b45309; padding-left:10px; margin:6px 0; }
+      .sev-low { color:#93c5fd; border-left:3px solid #1d4ed8; padding-left:10px; margin:6px 0; }
+      .sev-info { color:#cbd5e1; border-left:3px solid #475569; padding-left:10px; margin:6px 0; }
+      .metric-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:10px; }
+      .metric { background:#111827; border:1px solid #1f2a44; border-radius:10px; padding:10px 12px; }
+      .metric .label { color:#94a3b8; font-size:12px; }
+      .metric .value { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:16px; margin-top:4px; }
+      table th { color:#94a3b8; font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:0.05em; }
+      .chip { display:inline-block; padding:2px 8px; border-radius:999px; background:#111827; border:1px solid #1f2a44; font-size:12px; margin-right:6px; }
+      form.filters { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:10px; }
+      form.filters label { display:flex; flex-direction:column; gap:4px; color:#94a3b8; font-size:12px; }
+      form.filters input, form.filters select {
+        background:#0b1220; color:#e5e7eb; border:1px solid #1f2a44; border-radius:6px; padding:6px 8px;
+        font-family: ui-monospace, Consolas, monospace;
+      }
+      form.filters button {
+        background:#1d4ed8; color:white; border:0; border-radius:6px; padding:7px 14px; cursor:pointer;
+      }
+      form.filters button.secondary { background:#374151; }
+      .act-rate-bar { height:6px; background:#1f2a44; border-radius:3px; overflow:hidden; margin-top:3px; }
+      .act-rate-bar > div { height:100%; background:#1d4ed8; }
+    </style>
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>Journal · Reporte de trades</h1>
+        <div class="muted">
+          Fuente: <span class="mono">{{ log_path }}</span>
+          · Render: {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto-refresh 30s)
+        </div>
+        <div class="muted" style="margin-top:6px;">
+          <a href="/">← Dashboard</a>
+          &nbsp;|&nbsp;
+          <a href="/positions">Posiciones</a>
+          &nbsp;|&nbsp;
+          <a href="/reports">Reportes JSONL</a>
+        </div>
+
+        <form class="filters" method="get" action="/journal">
+          <label>últimos N días
+            <input type="number" name="days" min="1" max="365" value="{{ days }}" placeholder="(todos)" />
+          </label>
+          <label>desde
+            <input type="text" name="since" value="{{ since }}" placeholder="YYYY-MM-DD" />
+          </label>
+          <label>hasta
+            <input type="text" name="until" value="{{ until }}" placeholder="YYYY-MM-DD" />
+          </label>
+          <button type="submit">aplicar</button>
+          <button type="button" class="secondary" onclick="window.location.href='/journal'">reset</button>
+        </form>
+      </div>
+      {% if summary %}
+      <div class="pill">
+        {{ summary.range.n_trades }} trades · {{ summary.range.n_events }} eventos
+      </div>
+      {% endif %}
+    </div>
+
+    {% if error %}
+    <div class="card warn">
+      <strong>No se pudo renderizar el journal.</strong>
+      <div class="mono" style="margin-top:6px;">{{ error }}</div>
+      <div class="muted" style="margin-top:8px;">
+        Tip: también podés correrlo en consola con
+        <span class="mono">py .\analyze_trades.py</span> o <span class="mono">py .\analyze_trades.py --last-days 7</span>.
+      </div>
+    </div>
+    {% endif %}
+
+    {% if summary %}
+    {% set o = summary.overall %}
+    {% set rng = summary.range %}
+
+    <div class="card">
+      <h2>Resumen</h2>
+      <div class="muted" style="margin-bottom:12px;">
+        {% if rng.from %}
+        Rango eventos: <span class="mono">{{ rng["from"] }}</span> → <span class="mono">{{ rng["to"] }}</span>
+        {% endif %}
+      </div>
+
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="label">Trades cerrados</div>
+          <div class="value">{{ o.n_trades }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Win rate</div>
+          <div class="value">{{ "%.1f"|format(o.win_rate_pct) }}% <span class="muted" style="font-size:12px;">({{ o.wins }}W / {{ o.losses }}L)</span></div>
+        </div>
+        <div class="metric">
+          <div class="label">Net</div>
+          <div class="value {{ 'good' if o.net >= 0 else 'bad' }}">${{ "%+.2f"|format(o.net) }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Expectancy / trade</div>
+          <div class="value {{ 'good' if o.expectancy >= 0 else 'bad' }}">${{ "%+.2f"|format(o.expectancy) }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Profit factor</div>
+          <div class="value">
+            {% if o.profit_factor is none %}∞{% else %}{{ "%.2f"|format(o.profit_factor) }}{% endif %}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="label">Avg win · Avg loss</div>
+          <div class="value">
+            <span class="good">${{ "%+.2f"|format(o.avg_win) }}</span>
+            ·
+            <span class="bad">${{ "%+.2f"|format(o.avg_loss) }}</span>
+          </div>
+        </div>
+        <div class="metric">
+          <div class="label">Max drawdown realizado</div>
+          <div class="value bad">${{ "%+.2f"|format(-o.max_drawdown_abs) }} <span class="muted" style="font-size:12px;">({{ "%.1f"|format(o.max_drawdown_pct_peak) }}% peak)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Auto-findings</h2>
+      {% if summary.findings %}
+        {% for f in summary.findings %}
+          <div class="sev-{{ f.severity }}">[{{ f.severity|upper }}] {{ f.message }}</div>
+        {% endfor %}
+      {% else %}
+        <div class="muted">Nada llamativo todavía (se necesitan más trades cerrados para hacer análisis).</div>
+      {% endif %}
+    </div>
+
+    {% if summary.trade_grading %}
+    {% set tg = summary.trade_grading %}
+    <div class="card">
+      <h2>Trade grading (Elder — Study Guide, cap. 10)</h2>
+      <div class="muted" style="margin-bottom:10px;">
+        <strong>Entry/Exit grade</strong>: 100% = compraste al mínimo / vendiste al máximo de la vela de M15 donde se ejecutó la orden.
+        <strong>Trade grade</strong>: ganancia capturada / altura del canal (ATR*4). Elder: &gt;= 33% ⇒ A.
+      </div>
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="label">Entry grade avg</div>
+          <div class="value">
+            {% if tg.avg.entry_grade_pct is not none %}{{ "%.1f"|format(tg.avg.entry_grade_pct) }}%{% else %}—{% endif %}
+            <span class="muted" style="font-size:12px;"> (n={{ tg.n_graded.entry }})</span>
+          </div>
+        </div>
+        <div class="metric">
+          <div class="label">Exit grade avg</div>
+          <div class="value">
+            {% if tg.avg.exit_grade_pct is not none %}{{ "%.1f"|format(tg.avg.exit_grade_pct) }}%{% else %}—{% endif %}
+            <span class="muted" style="font-size:12px;"> (n={{ tg.n_graded.exit }})</span>
+          </div>
+        </div>
+        <div class="metric">
+          <div class="label">Trade grade avg</div>
+          <div class="value {{ 'good' if (tg.avg.trade_grade_pct or 0) >= 10 else 'bad' if (tg.avg.trade_grade_pct or 0) < 0 else '' }}">
+            {% if tg.avg.trade_grade_pct is not none %}{{ "%.1f"|format(tg.avg.trade_grade_pct) }}%{% else %}—{% endif %}
+            <span class="muted" style="font-size:12px;"> (n={{ tg.n_graded.trade }})</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:14px;">
+        <div>
+          <h3 style="margin:6px 0; color:#cbd5e1;">Distribución de letras</h3>
+          <table>
+            <thead>
+              <tr><th>dimensión</th><th>A</th><th>B</th><th>C</th><th>D</th><th>F</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">entry</td>
+                <td class="mono good">{{ tg.letter_distribution.entry.A }}</td>
+                <td class="mono">{{ tg.letter_distribution.entry.B }}</td>
+                <td class="mono muted">{{ tg.letter_distribution.entry.C }}</td>
+                <td class="mono bad">{{ tg.letter_distribution.entry.D }}</td>
+                <td class="mono">—</td>
+              </tr>
+              <tr>
+                <td class="mono">exit</td>
+                <td class="mono good">{{ tg.letter_distribution.exit.A }}</td>
+                <td class="mono">{{ tg.letter_distribution.exit.B }}</td>
+                <td class="mono muted">{{ tg.letter_distribution.exit.C }}</td>
+                <td class="mono bad">{{ tg.letter_distribution.exit.D }}</td>
+                <td class="mono">—</td>
+              </tr>
+              <tr>
+                <td class="mono">trade</td>
+                <td class="mono good">{{ tg.letter_distribution.trade.A }}</td>
+                <td class="mono">{{ tg.letter_distribution.trade.B }}</td>
+                <td class="mono muted">{{ tg.letter_distribution.trade.C }}</td>
+                <td class="mono">{{ tg.letter_distribution.trade.D }}</td>
+                <td class="mono bad">{{ tg.letter_distribution.trade.F }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3 style="margin:6px 0; color:#cbd5e1;">P&amp;L por letra (trade grade)</h3>
+          <table>
+            <thead>
+              <tr><th>letra</th><th>n</th><th>net</th><th>avg</th></tr>
+            </thead>
+            <tbody>
+              {% for letter in ["A","B","C","D","F"] %}
+                {% set d = tg.pnl_by_trade_grade_letter[letter] %}
+                {% if d.n > 0 %}
+                <tr>
+                  <td class="mono">{{ letter }}</td>
+                  <td class="mono">{{ d.n }}</td>
+                  <td class="mono {{ 'good' if d.net >= 0 else 'bad' }}">${{ "%+.2f"|format(d.net) }}</td>
+                  <td class="mono {{ 'good' if d.avg >= 0 else 'bad' }}">${{ "%+.2f"|format(d.avg) }}</td>
+                </tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="grid">
+      <div class="card">
+        <h2>Por símbolo</h2>
+        {% if ctx.by_symbol %}
+        <table>
+          <thead>
+            <tr><th>símbolo</th><th>n</th><th>win%</th><th>net</th><th>expect</th><th>PF</th></tr>
+          </thead>
+          <tbody>
+            {% for sym, b in ctx.by_symbol %}
+            <tr>
+              <td class="mono">{{ sym }}</td>
+              <td class="mono">{{ b.n }}</td>
+              <td class="mono">{{ "%.1f"|format(b.win_rate_pct) }}%</td>
+              <td class="mono {{ 'good' if b.net >= 0 else 'bad' }}">${{ "%+.2f"|format(b.net) }}</td>
+              <td class="mono {{ 'good' if b.expectancy >= 0 else 'bad' }}">${{ "%+.2f"|format(b.expectancy) }}</td>
+              <td class="mono">{% if b.profit_factor is none %}∞{% else %}{{ "%.2f"|format(b.profit_factor) }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="muted">Sin trades cerrados.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Por lado</h2>
+        {% if ctx.by_side %}
+        <table>
+          <thead>
+            <tr><th>side</th><th>n</th><th>win%</th><th>net</th><th>expect</th><th>PF</th></tr>
+          </thead>
+          <tbody>
+            {% for side, b in ctx.by_side %}
+            <tr>
+              <td class="mono {{ 'good' if side == 'BUY' else 'bad' if side == 'SELL' else '' }}">{{ side }}</td>
+              <td class="mono">{{ b.n }}</td>
+              <td class="mono">{{ "%.1f"|format(b.win_rate_pct) }}%</td>
+              <td class="mono {{ 'good' if b.net >= 0 else 'bad' }}">${{ "%+.2f"|format(b.net) }}</td>
+              <td class="mono {{ 'good' if b.expectancy >= 0 else 'bad' }}">${{ "%+.2f"|format(b.expectancy) }}</td>
+              <td class="mono">{% if b.profit_factor is none %}∞{% else %}{{ "%.2f"|format(b.profit_factor) }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="muted">Sin datos.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Por sesión (Buenos Aires)</h2>
+        {% if ctx.by_session %}
+        <table>
+          <thead>
+            <tr><th>sesión</th><th>n</th><th>win%</th><th>net</th><th>expect</th></tr>
+          </thead>
+          <tbody>
+            {% for label, b in ctx.by_session %}
+            <tr>
+              <td class="mono">{{ label }}</td>
+              <td class="mono">{{ b.n }}</td>
+              <td class="mono">{{ "%.1f"|format(b.win_rate_pct) }}%</td>
+              <td class="mono {{ 'good' if b.net >= 0 else 'bad' }}">${{ "%+.2f"|format(b.net) }}</td>
+              <td class="mono {{ 'good' if b.expectancy >= 0 else 'bad' }}">${{ "%+.2f"|format(b.expectancy) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="muted">Sin datos.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Por día de la semana</h2>
+        {% if ctx.by_weekday %}
+        <table>
+          <thead>
+            <tr><th>día</th><th>n</th><th>win%</th><th>net</th><th>expect</th></tr>
+          </thead>
+          <tbody>
+            {% for label, b in ctx.by_weekday %}
+            <tr>
+              <td class="mono">{{ label }}</td>
+              <td class="mono">{{ b.n }}</td>
+              <td class="mono">{{ "%.1f"|format(b.win_rate_pct) }}%</td>
+              <td class="mono {{ 'good' if b.net >= 0 else 'bad' }}">${{ "%+.2f"|format(b.net) }}</td>
+              <td class="mono {{ 'good' if b.expectancy >= 0 else 'bad' }}">${{ "%+.2f"|format(b.expectancy) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="muted">Sin datos.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Por ADX al entry</h2>
+        {% if ctx.by_adx_bucket %}
+        <table>
+          <thead>
+            <tr><th>bucket</th><th>n</th><th>win%</th><th>net</th><th>expect</th></tr>
+          </thead>
+          <tbody>
+            {% for label, b in ctx.by_adx_bucket %}
+            <tr>
+              <td class="mono">{{ label }}</td>
+              <td class="mono">{{ b.n }}</td>
+              <td class="mono">{{ "%.1f"|format(b.win_rate_pct) }}%</td>
+              <td class="mono {{ 'good' if b.net >= 0 else 'bad' }}">${{ "%+.2f"|format(b.net) }}</td>
+              <td class="mono {{ 'good' if b.expectancy >= 0 else 'bad' }}">${{ "%+.2f"|format(b.expectancy) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="muted">Sin datos.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Por motivo de cierre</h2>
+        {% if ctx.by_close_reason %}
+        <table>
+          <thead>
+            <tr><th>motivo</th><th>n</th><th>win%</th><th>net</th><th>expect</th></tr>
+          </thead>
+          <tbody>
+            {% for label, b in ctx.by_close_reason %}
+            <tr>
+              <td class="mono">{{ label }}</td>
+              <td class="mono">{{ b.n }}</td>
+              <td class="mono">{{ "%.1f"|format(b.win_rate_pct) }}%</td>
+              <td class="mono {{ 'good' if b.net >= 0 else 'bad' }}">${{ "%+.2f"|format(b.net) }}</td>
+              <td class="mono {{ 'good' if b.expectancy >= 0 else 'bad' }}">${{ "%+.2f"|format(b.expectancy) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="muted">Sin datos.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Por hora del día (apertura)</h2>
+      {% if ctx.by_hour %}
+      <table>
+        <thead>
+          <tr><th>hora</th><th>n</th><th>win%</th><th>net</th><th>expect</th><th>PF</th></tr>
+        </thead>
+        <tbody>
+          {% for label, b in ctx.by_hour %}
+          <tr>
+            <td class="mono">{{ label }}</td>
+            <td class="mono">{{ b.n }}</td>
+            <td class="mono">{{ "%.1f"|format(b.win_rate_pct) }}%</td>
+            <td class="mono {{ 'good' if b.net >= 0 else 'bad' }}">${{ "%+.2f"|format(b.net) }}</td>
+            <td class="mono {{ 'good' if b.expectancy >= 0 else 'bad' }}">${{ "%+.2f"|format(b.expectancy) }}</td>
+            <td class="mono">{% if b.profit_factor is none %}∞{% else %}{{ "%.2f"|format(b.profit_factor) }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="muted">Sin trades cerrados todavía.</div>
+      {% endif %}
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Signal funnel (decisiones por símbolo)</h2>
+        {% if ctx.signal_funnel %}
+        <table>
+          <thead>
+            <tr><th>símbolo</th><th>señales</th><th>NONE</th><th>BUY</th><th>SELL</th><th>act %</th></tr>
+          </thead>
+          <tbody>
+            {% for r in ctx.signal_funnel %}
+            <tr>
+              <td class="mono">{{ r.symbol }}</td>
+              <td class="mono">{{ r.total }}</td>
+              <td class="mono muted">{{ r.NONE }}</td>
+              <td class="mono good">{{ r.BUY }}</td>
+              <td class="mono bad">{{ r.SELL }}</td>
+              <td class="mono">
+                {{ "%.1f"|format(r.act_rate) }}%
+                <div class="act-rate-bar"><div style="width:{{ r.act_rate if r.act_rate <= 100 else 100 }}%;"></div></div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="muted">Sin señales registradas.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Actividad de filtros / eventos</h2>
+        <table>
+          <thead>
+            <tr><th>evento</th><th>count</th></tr>
+          </thead>
+          <tbody>
+            {% for name, count in ctx.event_counts %}
+            <tr>
+              <td class="mono">{{ name }}</td>
+              <td class="mono {% if count > 0 %}good{% else %}muted{% endif %}">{{ count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if summary.equity_curve %}
+    <div class="card">
+      <h2>Últimos 20 trades cerrados (equity acumulada)</h2>
+      <table>
+        <thead>
+          <tr><th>cerrado</th><th>símbolo</th><th>side</th><th>net</th><th>equity</th></tr>
+        </thead>
+        <tbody>
+          {% for p in summary.equity_curve[-20:] %}
+          <tr>
+            <td class="mono">{{ p.ts }}</td>
+            <td class="mono">{{ p.symbol }}</td>
+            <td class="mono {{ 'good' if p.side == 'BUY' else 'bad' }}">{{ p.side }}</td>
+            <td class="mono {{ 'good' if p.net >= 0 else 'bad' }}">${{ "%+.2f"|format(p.net) }}</td>
+            <td class="mono {{ 'good' if p.equity >= 0 else 'bad' }}">${{ "%+.2f"|format(p.equity) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% endif %}
+  </body>
+</html>

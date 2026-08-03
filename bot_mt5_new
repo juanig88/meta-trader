@@ -1,0 +1,4749 @@
+import os
+import sys
+import time
+import math
+import logging
+import json
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from datetime import time as dt_time
+from pathlib import Path
+from typing import Optional, Tuple, Literal, Any
+
+import MetaTrader5 as mt5
+from indicators import adx_wilder
+from strategy_core import (
+    decide,
+    Features,
+    StrategyParams,
+    price_slope_m15,
+    rsi_from_closes,
+    symbol_uses_crypto_relaxed_m15,
+    trend_h4_from_closes,
+)
+
+import telegram_notify
+
+
+Signal = Literal["BUY", "SELL", "NONE"]
+Trend = Literal["UP", "DOWN", "FLAT"]
+
+_last_trade_time: dict[str, datetime] = {}
+# Tras rechazo de order_send (broker): no reintentar abrir hasta pasado failed_attempt_cooldown_seconds.
+_last_failed_order_attempt: dict[str, datetime] = {}
+# Ventana deslizante de aperturas por símbolo (rate-limit / hora reales).
+_symbol_open_timestamps: dict[str, list[datetime]] = {}
+# PnL máximo visto (flotante) por ticket, para el escalón USD de profit lock (persiste mientras dura la posición).
+_PROFIT_LOCK_PEAK_PROFIT: dict[int, float] = {}
+# Escalera USD (BE + locks +1..+N) con tiempos entre pasos; se limpia al cerrar la posición.
+_USD_SL_LADDER_STATE: dict[int, dict[str, Any]] = {}
+
+# Última etiqueta de régimen conocida por símbolo (market_regime.check_all); usada para multiplicador de lote.
+_LAST_REGIME_BY_SYMBOL: dict[str, str] = {}
+# Parches acumulativos sobre BOT_SYMBOL_CONFIG (.env): se fusionan al arrancar y se actualizan con régimen automático.
+SYMBOL_CONFIG_OVERLAY_FILE = Path("symbol_config_overlay.json")
+REGIME_APPLY_AUDIT_JSONL = Path("regime_apply_audit.jsonl")
+
+# Deals de cierre (DEAL_ENTRY_OUT) ya notificados por Telegram (evita duplicados).
+_TELEGRAM_SEEN_OUT_DEAL_TICKETS: set[int] = set()
+_TELEGRAM_CLOSE_TRACKER_SEEDED: bool = False
+
+_CLOSE_LOG_SEEN_DEAL_TICKETS: set[int] = set()
+_CLOSE_LOG_TRACKER_SEEDED: bool = False
+_CLOSE_LOG_BACKFILL_DONE: bool = False
+# How far back to look at startup when backfilling missing TRADE_CLOSE events.
+# Covers bot restarts / code upgrades mid-session without flooding the log.
+_CLOSE_LOG_BACKFILL_DAYS: int = 7
+_spread_ema_points: dict[str, float] = {}
+_portfolio_dynamic_weights: dict[str, float] = {}
+_portfolio_last_rebalance: Optional[datetime] = None
+_TRADES_LOG_FILENAME = "trades.log"
+
+
+@dataclass(frozen=True)
+class Config:
+    symbols: Tuple[str, ...] = ("EURUSD", "USDJPY")
+    lot: float = 0.01
+    poll_seconds: int = 30
+    # Durante el tiempo entre ciclos completos, volver a gestionar SL/TP al menos cada N segundos
+    # (solo `manage_positions`; el resto del loop sigue en `poll_seconds`).
+    manage_positions_interval_seconds: float = 5.0
+    symbol_config: dict[str, dict] = field(default_factory=dict)
+
+    # Money-based targets in account currency (commonly EUR/USD depending on account).
+    sl_money: float = -0.80
+    tp_money: float = 1.00
+    # Optional deterministic targets in points (if set, overrides money-based SL/TP for that symbol)
+    sl_points: float = 80.0
+    tp_points: float = 160.0
+
+    trail_trigger_money: float = 1.00
+    trail_new_sl_money: float = 0.50
+    trail_new_tp_money: float = 1.20
+    break_even_trigger_money: float = 0.50
+    break_even_offset_points: float = 0.0  # optional extra points beyond entry (0 = pure BE)
+
+    max_spread_points: float = 25.0
+    spread_dynamic_enabled: bool = False
+    spread_dynamic_alpha: float = 0.15  # EMA smoothing for avg spread
+    spread_dynamic_mult: float = 1.5  # current spread must be <= mult * avg spread
+    magic: int = 260414
+    deviation_points: int = 20
+
+    # Global risk controls
+    max_open_trades: int = 5
+    max_open_trades_total: int = 5
+    daily_loss_limit: float = -60.0  # stop opening new trades if daily PnL <= this (account currency)
+    use_risk_sizing: bool = True
+    risk_per_trade_pct: float = 10.0  # % of balance (portfolio mode scales by symbol weight)
+    cooldown_minutes: int = 30
+    # Piso de minutos entre aperturas en símbolos crypto (relajado M15). Evita martillar entradas si el JSON puso cooldown bajo.
+    cooldown_minutes_crypto_floor: int = 6
+    # Máximo de órdenes de apertura por símbolo por hora (0 = sin límite global). Crypto usa `max_trades_per_hour_crypto_default` si esto es 0.
+    max_trades_per_hour_per_symbol: int = 0
+    max_trades_per_hour_crypto_default: int = 8
+    # Tras order_send rechazado (retcode ≠ DONE): espera antes de otra entrada en ese símbolo. 0 = desactivado.
+    failed_attempt_cooldown_seconds: float = 120.0
+
+    # --- Monthly loss limit (Elder's 6% Rule, New Trading for a Living ch.9) ---
+    # When total "at risk" this month exceeds `monthly_loss_limit_pct` of the
+    # balance at the 1st of the month, STOP opening new trades for the rest of
+    # the month. "At risk" = realized losses so far + potential loss if every
+    # currently open position hit its SL (if `include_open_risk` is True).
+    # This is Elder's explicit rule to escape cascades of small losses that
+    # add up to a serious drawdown before the 2%-per-trade cap catches it.
+    monthly_loss_limit_enabled: bool = False
+    monthly_loss_limit_pct: float = 6.0
+    monthly_loss_limit_include_open_risk: bool = True
+
+    # Pyramiding (multiple positions per symbol)
+    # max_positions_per_symbol = 1 disables pyramiding (default).
+    # When > 1, additional entries on the same symbol are allowed under guards below.
+    max_positions_per_symbol: int = 1
+    # If True, only allow a new entry on the same symbol when ALL existing positions
+    # on that symbol already have SL at break-even (or better). Highly recommended.
+    pyramiding_require_be: bool = True
+    # Minimum price separation (in broker points) from the most recent same-side entry
+    # before allowing another entry. 0 disables this guard.
+    pyramiding_min_separation_points: float = 0.0
+
+    # Portfolio mode: distribute total risk across symbols by weights
+    portfolio_enabled: bool = True
+    portfolio_weights: dict[str, float] = field(default_factory=dict)
+
+    # Portfolio weights dynamic rebalance (live): compute weights from realized PnL per symbol (history deals)
+    portfolio_dynamic_enabled: bool = False
+    portfolio_dynamic_lookback_days: int = 14
+    portfolio_dynamic_rebalance_minutes: int = 60
+    portfolio_dynamic_smoothing_alpha: float = 0.35  # EMA of weights (0..1). Higher = react faster.
+    portfolio_dynamic_min_weight: float = 0.05  # floor so a symbol doesn't get fully disabled
+    portfolio_dynamic_max_weight: float = 0.60  # cap to avoid concentration
+    portfolio_dynamic_use_positive_only: bool = True  # if True: clamp negative pnl to 0 before scoring
+
+    # Trading window (local PC clock by default; see BOT_TRADING_WINDOW_SESSIONS / _TIMEZONE)
+    start_hour: int = 11
+    end_hour: int = 16  # inclusive end: trades allowed up to 16:00:00 (legacy hour-only gate)
+    # Extra cutoff to avoid opening trades close to end of session
+    no_new_trades_after_hour: int = 15
+    no_new_trades_after_minute: int = 30
+    trading_window_enabled: bool = False
+    # Rangos HH:MM–HH:MM separados por coma (ej. 06:00-12:00,13:00-18:00). Vacío ⇒ solo start_hour/end_hour.
+    trading_window_sessions: Tuple[Tuple[dt_time, dt_time], ...] = ()
+    # LOCAL = mismo reloj que las demás barreras (now del loop). UTC/GMT = reloj de pared UTC (broker-independiente).
+    trading_window_timezone: str = "LOCAL"
+    weekend_block_enabled: bool = True
+    # Símbolos que ignoran el bloqueo de fin de semana (ej. crypto CFD 24/7) cuando `weekend_block_enabled`.
+    weekend_trade_symbols: Tuple[str, ...] = ()
+    friday_cutoff_enabled: bool = True
+    new_trade_cutoff_enabled: bool = True
+
+    # Filters (robustness)
+    ema_period_m15: int = 50  # kept for backward compatibility; used as "fast EMA" when EMA pair enabled
+    ema_fast_m15: int = 50
+    ema_slow_m15: int = 200
+    min_avg_range_points_m15: float = 0.0  # 0 disables volatility filter
+    adx_period_m15: int = 14
+    adx_min: float = 20.0  # below => lateral, no trade
+
+    # Crypto (relaxed M15): ventas solo si H4 cerrado está en DOWN (reduce shorts en chop alcista).
+    crypto_sell_requires_h4_down: bool = True
+
+    # Pendiente de regresión sobre N cierres M15: confirma dirección antes de BUY/SELL (modo allow_flat_h4).
+    price_slope_filter_enabled: bool = False
+    price_slope_n: int = 6
+
+    # Tras risk sizing: multiplicar lote por etiqueta de régimen (TRENDING/RANGING/UNCERTAIN). Requiere detector activo.
+    regime_lot_sizing_enabled: bool = False
+    regime_lot_multiplier_by_label: dict[str, float] = field(default_factory=dict)
+
+    # Tope duro de volumen por operación (0 = off). Por símbolo: clave max_lot_per_trade en BOT_SYMBOL_CONFIG / overlay.
+    max_lot_per_trade: float = 0.0
+
+    # --- Sideways / range filters (entry quality) ---
+    # Range filter: detect recent range on a higher timeframe and avoid trading in the "middle" of that range.
+    # This reduces chop losses in lateral markets (common in crypto CFDs).
+    range_filter_enabled: bool = False
+    range_filter_timeframe: str = "H1"  # H1 recommended for intraday chop; H4 for broader ranges
+    range_filter_lookback_bars: int = 24  # e.g. 24 H1 bars = last 24 hours
+    # If current price is within this fraction of the range around the mid, skip (0.30 means middle 60% of range).
+    range_filter_mid_frac: float = 0.30
+
+    # Candle strength filter: require the entry candle to have a strong body and not be a doji / long-wick rejection.
+    candle_filter_enabled: bool = False
+    candle_body_min_frac: float = 0.60  # body >= 60% of candle range
+    candle_wick_max_frac: float = 0.35  # each wick <= 35% of candle range
+    candle_require_confirmation: bool = False  # require previous candle to confirm momentum
+
+    # Connection retry
+    connect_retries: int = 5
+    connect_retry_sleep: float = 2.0
+
+    # News-time block (simple)
+    news_block_hours: Tuple[int, ...] = ()  # e.g. (14, 15)
+
+    # --- Quiet-session filter (FX) ---
+    # Block new entries during low-liquidity hours (post-NY close + Asia-only hours)
+    # for symbols NOT in `quiet_session_exempt_symbols`. Crypto 24/7 should be in the
+    # exempt list. Hours are in the bot's LOCAL timezone (same clock as now()).
+    # Default off so existing deployments behave unchanged.
+    quiet_session_block_enabled: bool = False
+    quiet_session_hours: Tuple[int, ...] = (23, 0, 1, 2, 3)
+    quiet_session_exempt_symbols: Tuple[str, ...] = ()
+
+    # --- Anti-chase filter (exhaustion candle) ---
+    # If True: skip new entries when the last closed M15 candle has a range (high-low)
+    # greater than anti_chase_atr_mult * ATR(anti_chase_atr_period). This avoids
+    # entering on blow-off / exhaustion bars where mean reversion is likely.
+    anti_chase_enabled: bool = True
+    anti_chase_atr_period: int = 20
+    anti_chase_atr_mult: float = 2.0
+    # En crypto, no usar mult por debajo de este valor (velas más largas vs ATR; evita bloqueo casi permanente cerca del umbral).
+    anti_chase_atr_mult_crypto_floor: float = 2.65
+
+    # --- Filter exit (momentum loss) ---
+    # If True: when an open position is NOT in loss, close it at market if the
+    # trend/momentum breaks (ADX falls below filter_exit_adx_min or EMA fast
+    # flips against the position side). Helps release capital from stalled trades
+    # and cut tails before they give back profits.
+    filter_exit_enabled: bool = True
+    # If None (0.0 by convention), use cfg.adx_min. Otherwise use this threshold.
+    filter_exit_adx_min: float = 0.0
+    # Require EMA fast direction to flip against the position side (safer: only exit
+    # when both momentum AND structure agree the move is done).
+    filter_exit_require_ema_reversal: bool = True
+    # Only filter-exit when profit >= this (avoids bailing near SL without reason).
+    filter_exit_min_profit_money: float = 0.0
+
+    # --- Open with SL at entry (experimental "zero initial risk" stop) ---
+    # If True, after computing SL/TP, SL is set to the entry (fill) price. TP stays.
+    # Broker may still reject or adjust if stops must be a minimum distance from price.
+    open_sl_at_entry: bool = False
+    # When open_sl_at_entry: try SL at price±0*point, then ±1*point, … up to this max (per stop rules).
+    open_sl_at_entry_max_extra_points: int = 400
+    # Primer índice extra a probar (0 = legacy). Suele dejarse 0; el broker mínimo se suma automáticamente.
+    open_sl_at_entry_min_extra_points: int = 0
+
+    # --- Profit lock ladder (USD): each time peak floating profit passes N*step, lock N*secure ---
+    # Example: step=1, secure=1 → at +$1.00 MFE move SL to guarantee ~+$1.00 on stop-out; at +$2, ~+$2, etc.
+    profit_lock_enabled: bool = False
+    profit_lock_step_money: float = 1.0
+    profit_lock_secure_money: float = 1.0
+    # Tight ATR trail often fights a USD ladder; when True, skip tight_trail if profit lock is on for that symbol.
+    skip_tight_trail_when_profit_lock: bool = True
+
+    # --- USD SL ladder (live): ~-$0.80 al abrir → esperar → BE (0) → cada +$1 hasta +$N con esperas ---
+    # Reemplaza BE / trailing clásico / profit_lock mientras esté activo. ON/OFF es global (todos los símbolos);
+    # en BOT_SYMBOL_CONFIG solo se pueden tunear initial_sl / tiempos / max_lock, no desactivar por activo.
+    usd_sl_ladder_enabled: bool = True
+    usd_sl_ladder_initial_sl_money: float = 0.80  # riesgo inicial aprox. en moneda de cuenta (positivo)
+    usd_ladder_wait_be_seconds: int = 180  # "unos minutos" antes de mover a BE
+    usd_ladder_step_seconds: int = 120  # espera entre pasos (post-BE y entre locks +$1, +$2, …)
+    usd_ladder_max_lock_usd: int = 0  # 0 = sin tope (+$1,+,$2,… mientras suba profit); >0 = tope en ese USD
+
+    # --- Signal inversion (experimental: open opposite side of decide()) ---
+    # If True, BUY → SELL and SELL → BUY at decision time. NONE stays NONE.
+    # Justificación (jun 2026): muestras reales muestran entradas sistemáticamente anti-correlacionadas
+    # con la dirección real (mayo: avg MAE 0.29% vs MFE 0.07% en perdedores; jun 13-14: 5/5 perdedores
+    # cada uno en sentido opuesto). Invertir es el A/B test más simple.
+    invert_signals: bool = False
+
+    # --- ATR-based profit trailing (Chandelier-style, replaces USD ladder) ---
+    # Wait until profit >= activation_mult * initial_risk_money (measured from current SL distance),
+    # then trail SL at K * ATR(M15) behind current price. Monotonic: SL only moves closer to price.
+    # Designed to avoid cutting winners short on M15 chop while still locking gains on real runs.
+    # Mutually exclusive with usd_sl_ladder_enabled (ladder takes precedence if both on).
+    atr_profit_trail_enabled: bool = False
+    atr_profit_trail_activation_mult: float = 1.5  # activate when profit >= mult * initial risk in money
+    atr_profit_trail_atr_period: int = 14
+    atr_profit_trail_atr_mult: float = 2.5  # SL distance = atr_mult * ATR(M15)
+
+    # --- USD ladder extensions (micro-BE, high-water trailing, stagnant close) ---
+    # 0 = off. Per-symbol overrides: micro_be_trigger_money, hwm_trail_pct, stagnant_* en BOT_SYMBOL_CONFIG.
+    micro_be_trigger_money: float = 0.0
+    hwm_trail_pct: float = 0.0
+    stagnant_timeout_minutes: float = 0.0
+    stagnant_max_profit_threshold: float = 0.0
+
+    # --- Tight trailing stop post-profit ---
+    # Once the position has earned at least `tight_trail_trigger_money`, apply a
+    # tighter trailing stop at ATR(M15) * tight_trail_atr_mult distance from the
+    # current price. This only moves the SL closer (monotonic); TP is left alone
+    # so runners can keep running.
+    tight_trail_enabled: bool = True
+    tight_trail_trigger_money: float = 2.0
+    tight_trail_atr_period: int = 14
+    tight_trail_atr_mult: float = 1.2
+
+    # --- Correlation / exposure caps (Turtle, Way of the Turtle Ch.8 pp.118-119) ---
+    # Groups of symbols sharing directional risk (e.g. all USD-denominated, all crypto).
+    # When the count of OPEN positions in a group reaches `max_positions_per_group`,
+    # new entries in ANY symbol of that group are blocked. Pyramiding layers count.
+    # A symbol can belong to multiple groups (all caps are enforced independently).
+    # Prevents stacking N correlated trades that move together on a single macro tick.
+    correlation_groups: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    max_positions_per_group: int = 0  # 0 = disabled
+
+    # --- ATR-based SL/TP (Turtle-style, volatility-adaptive) ---
+    # When enabled, SL and TP distances are computed from ATR at entry time:
+    #   sl_distance = ATR * sl_atr_mult   (Turtle: 2N = 2*ATR)
+    #   tp_distance = ATR * tp_atr_mult   (default 2R target = 4*ATR)
+    # Overrideable per-symbol via sl_tp_atr_enabled, sl_atr_mult, tp_atr_mult,
+    # sl_tp_atr_timeframe, sl_tp_atr_period, sl_tp_atr_min_points.
+    # If ATR is not available at runtime, falls back to fixed sl_points/tp_points.
+    sl_tp_atr_enabled: bool = False
+    sl_tp_atr_timeframe: str = "M15"  # "M1"|"M5"|"M15"|"M30"|"H1"|"H4"|"D1"
+    sl_tp_atr_period: int = 14
+    sl_atr_mult: float = 2.0
+    tp_atr_mult: float = 4.0
+    # Floor for the ATR-derived SL distance (in points). If ATR is so small that
+    # sl_points < floor, we bump SL to the floor and scale TP by the same ratio.
+    # 0 = no floor.
+    sl_tp_atr_min_points: float = 0.0
+
+    # Reconciliación tras reinicio: muchas posiciones manuales / recovery vienen con magic=0.
+    track_zero_magic_positions: bool = True
+    # Si 1: al arrancar cancela órdenes pendientes (limit/stop) con nuestro magic en símbolos del bot.
+    cancel_orphan_pending_on_start: bool = False
+
+    # --- XAUUSD parallel strategy (independent magic + exit rules; does not alter other symbols) ---
+    xauusd_parallel_enabled: bool = False
+    xauusd_parallel_symbol: str = "XAUUSD"
+    xauusd_parallel_magic: int = 260415
+    xauusd_parallel_lot: float = 0.01
+    xauusd_parallel_tp_money: float = 0.15
+    xauusd_parallel_max_positions: int = 1
+    xauusd_parallel_max_spread_points: float = 55.0
+
+
+def _log_event(payload: dict) -> None:
+    """
+    Structured log line (JSON) so it can be parsed later for stats.
+    """
+    try:
+        logging.info(json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        logging.info("%s", payload)
+
+
+def _save_state(state: dict) -> None:
+    """
+    Writes bot state atomically to bot_state.json (used by dashboard/backtest tooling).
+    """
+    target = "bot_state.json"
+    # Use a unique tmp name to avoid collisions if multiple processes run.
+    tmp = f"{target}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2, default=str)
+
+        # On Windows, replacing can fail transiently if another process is reading the file.
+        # We retry a few times; if it still fails, fall back to direct write.
+        last_exc: Exception | None = None
+        for _ in range(8):
+            try:
+                os.replace(tmp, target)
+                return
+            except PermissionError as e:
+                last_exc = e
+                time.sleep(0.05)
+            except OSError as e:
+                last_exc = e
+                time.sleep(0.05)
+
+        try:
+            with open(target, "w", encoding="utf-8") as f2:
+                json.dump(state, f2, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            if last_exc is not None:
+                logging.warning("Could not atomically replace %s (will continue). err=%r", target, last_exc)
+            raise
+        if last_exc is not None:
+            logging.warning("Atomic replace failed for %s; used direct write instead. err=%r", target, last_exc)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+
+
+def _save_stopped_state(reason: str) -> None:
+    """Mark bot as not running (Ctrl+C, error exit, etc.)."""
+    try:
+        _save_state(
+            {
+                "running": False,
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "mode": "STOPPED",
+                "stop_reason": reason,
+                "pid": os.getpid(),
+            }
+        )
+    except Exception:
+        logging.exception("Could not write stopped state to bot_state.json.")
+
+
+def _parse_symbol_config(raw: Optional[str]) -> dict[str, dict]:
+    """
+    Parse per-symbol overrides from JSON.
+    Example:
+      {
+        "EURUSD": {"sl_money": -0.8, "tp_money": 1.0, "max_spread_points": 25},
+        "XAUUSD": {"sl_points": 80, "tp_points": 160, "max_spread_points": 55},
+        "BTCUSD": {"sl_points": 40000, "tp_points": 80000, "max_spread_points": 3500,
+                   "break_even_trigger_money": 25, "trail_trigger_money": 50,
+                   "trail_new_sl_money": 25, "trail_new_tp_money": 60}
+      }
+    """
+    if raw is None or raw.strip() == "":
+        return {}
+    try:
+        obj = json.loads(raw)
+        if not isinstance(obj, dict):
+            return {}
+        out: dict[str, dict] = {}
+        for k, v in obj.items():
+            if not isinstance(k, str) or not isinstance(v, dict):
+                continue
+            out[k.strip()] = v
+        return out
+    except Exception:
+        logging.exception("Failed to parse BOT_SYMBOL_CONFIG JSON.")
+        return {}
+
+
+def _deep_merge_symbol_config(base: dict[str, dict]) -> dict[str, dict]:
+    return {k: dict(v) for k, v in base.items()}
+
+
+def _load_symbol_config_overlay() -> dict[str, dict]:
+    try:
+        raw = SYMBOL_CONFIG_OVERLAY_FILE.read_text(encoding="utf-8")
+        obj = json.loads(raw)
+        if not isinstance(obj, dict):
+            return {}
+        out: dict[str, dict] = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and isinstance(v, dict):
+                out[k.strip()] = dict(v)
+        return out
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logging.exception("Reading %s failed; starting without overlay merges.", SYMBOL_CONFIG_OVERLAY_FILE)
+        return {}
+
+
+def _merge_symbol_configs(base: dict[str, dict], overlay: dict[str, dict]) -> dict[str, dict]:
+    merged = _deep_merge_symbol_config(base)
+    for sym, ov in overlay.items():
+        if not isinstance(ov, dict):
+            continue
+        merged.setdefault(sym, {})
+        merged[sym].update(ov)
+    return merged
+
+
+def resolve_symbol_config_with_overlay() -> tuple[dict[str, dict], dict[str, dict]]:
+    base = _parse_symbol_config(_env("BOT_SYMBOL_CONFIG"))
+    overlay: dict[str, dict] = {}
+    if not _env_bool("BOT_SYMBOL_CONFIG_OVERLAY_DISABLED", False):
+        overlay = _load_symbol_config_overlay()
+    return _merge_symbol_configs(base, overlay), overlay
+
+
+def _save_symbol_config_overlay(overlay: dict[str, dict]) -> None:
+    try:
+        SYMBOL_CONFIG_OVERLAY_FILE.write_text(json.dumps(overlay, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        logging.exception("Could not write %s", SYMBOL_CONFIG_OVERLAY_FILE)
+
+
+def _append_regime_apply_audit(row: dict) -> None:
+    try:
+        with REGIME_APPLY_AUDIT_JSONL.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        logging.exception("Could not append to %s", REGIME_APPLY_AUDIT_JSONL)
+
+
+def _parse_regime_lot_mult_json(raw: Optional[str]) -> dict[str, float]:
+    if raw is None or not str(raw).strip():
+        return {}
+    try:
+        obj = json.loads(str(raw).strip())
+        if not isinstance(obj, dict):
+            return {}
+        out: dict[str, float] = {}
+        for k, v in obj.items():
+            if not isinstance(k, str):
+                continue
+            try:
+                mul = float(v)
+            except (TypeError, ValueError):
+                continue
+            key = k.strip().upper()
+            if mul > 0:
+                out[key] = mul
+        return out
+    except Exception:
+        logging.exception("BOT_REGIME_LOT_MULT_JSON invalid; ignoring.")
+        return {}
+
+
+def _apply_pending_regime_auto_patches(cfg: Config, detector: Any) -> None:
+    if detector is None:
+        return
+    if not _env_bool("BOT_MARKET_REGIME_AUTO_APPLY", True):
+        try:
+            detector.take_pending_auto_patches()
+        except Exception:
+            logging.exception("take_pending_auto_patches failed while auto-apply is off.")
+        return
+    try:
+        patches = detector.take_pending_auto_patches()
+    except Exception:
+        logging.exception("take_pending_auto_patches failed.")
+        return
+    if not patches:
+        return
+
+    overlay = _load_symbol_config_overlay()
+    for symbol, prev_label, new_label, patch in patches:
+        if not isinstance(patch, dict) or not patch:
+            continue
+        sym = str(symbol).strip()
+        cfg.symbol_config.setdefault(sym, {})
+        cfg.symbol_config[sym].update(patch)
+        overlay.setdefault(sym, {})
+        overlay[sym].update(patch)
+        _append_regime_apply_audit(
+            {
+                "event": "REGIME_AUTO_PATCH",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "symbol": sym,
+                "prev_regime": prev_label,
+                "new_regime": new_label,
+                "patch": dict(patch),
+                "overlay_file": str(SYMBOL_CONFIG_OVERLAY_FILE),
+            }
+        )
+        logging.info(
+            "[RegimeAuto] %s %s→%s merged into cfg + overlay (%d keys): %s",
+            sym,
+            prev_label,
+            new_label,
+            len(patch),
+            patch,
+        )
+
+    _save_symbol_config_overlay(overlay)
+
+
+def _parse_portfolio_weights(raw: Optional[str], symbols: Tuple[str, ...]) -> dict[str, float]:
+    if not symbols:
+        return {}
+
+    def _equal() -> dict[str, float]:
+        w = 1.0 / float(len(symbols))
+        return {s: w for s in symbols}
+
+    if raw is None or raw.strip() == "":
+        return _equal()
+
+    raw = raw.strip()
+    parsed: dict[str, float] = {}
+    try:
+        if raw.startswith("{"):
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    if isinstance(k, str):
+                        try:
+                            parsed[k.strip()] = float(v)
+                        except Exception:
+                            continue
+        else:
+            for part in raw.split(","):
+                part = part.strip()
+                if not part or "=" not in part:
+                    continue
+                k, v = part.split("=", 1)
+                k = k.strip()
+                try:
+                    parsed[k] = float(v.strip())
+                except Exception:
+                    continue
+    except Exception:
+        return _equal()
+
+    cleaned = {s: max(0.0, float(parsed.get(s, 0.0))) for s in symbols}
+    total = sum(cleaned.values())
+    if total <= 0:
+        return _equal()
+    return {s: float(cleaned[s] / total) for s in symbols}
+
+
+def _normalize_weights(
+    symbols: Tuple[str, ...],
+    raw: dict[str, float],
+    *,
+    min_w: float,
+    max_w: float,
+) -> dict[str, float]:
+    if not symbols:
+        return {}
+    cleaned = {s: float(raw.get(s, 0.0) or 0.0) for s in symbols}
+    cleaned = {s: max(0.0, v) for s, v in cleaned.items()}
+    total = sum(cleaned.values())
+    if total <= 0:
+        eq = 1.0 / float(len(symbols))
+        cleaned = {s: eq for s in symbols}
+    else:
+        cleaned = {s: cleaned[s] / total for s in symbols}
+
+    min_w = max(0.0, float(min_w))
+    max_w = max(min_w, float(max_w))
+    clamped = {s: min(max_w, max(min_w, float(cleaned[s]))) for s in symbols}
+    tot2 = sum(clamped.values())
+    if tot2 <= 0:
+        eq = 1.0 / float(len(symbols))
+        return {s: eq for s in symbols}
+    return {s: float(clamped[s] / tot2) for s in symbols}
+
+
+def _maybe_rebalance_portfolio_weights(cfg: Config, now: Optional[datetime] = None) -> None:
+    global _portfolio_last_rebalance
+    now = now or datetime.now()
+    if not bool(cfg.portfolio_enabled) or not bool(cfg.portfolio_dynamic_enabled):
+        return
+    if not cfg.symbols:
+        return
+
+    if _portfolio_last_rebalance is not None:
+        mins = float(cfg.portfolio_dynamic_rebalance_minutes)
+        if mins > 0 and (now - _portfolio_last_rebalance).total_seconds() < mins * 60.0:
+            return
+
+    start = now - timedelta(days=int(max(1, cfg.portfolio_dynamic_lookback_days)))
+    deals = mt5.history_deals_get(start, now)
+    if deals is None:
+        return
+
+    pnl_by_sym: dict[str, float] = {s: 0.0 for s in cfg.symbols}
+    for d in deals:
+        if int(getattr(d, "magic", 0) or 0) != int(cfg.magic):
+            continue
+        sym = str(getattr(d, "symbol", "") or "")
+        if sym not in pnl_by_sym:
+            continue
+        pnl = float(getattr(d, "profit", 0.0) or 0.0)
+        pnl += float(getattr(d, "swap", 0.0) or 0.0)
+        pnl += float(getattr(d, "commission", 0.0) or 0.0)
+        pnl_by_sym[sym] += pnl
+
+    if bool(cfg.portfolio_dynamic_use_positive_only):
+        scores = {s: max(0.0, float(pnl_by_sym.get(s, 0.0))) for s in cfg.symbols}
+    else:
+        mn = min(float(pnl_by_sym.get(s, 0.0)) for s in cfg.symbols)
+        scores = {s: float(pnl_by_sym.get(s, 0.0)) - mn for s in cfg.symbols}
+
+    if sum(scores.values()) <= 0:
+        target = dict(cfg.portfolio_weights)
+    else:
+        target = dict(scores)
+
+    target = _normalize_weights(
+        cfg.symbols,
+        target,
+        min_w=float(cfg.portfolio_dynamic_min_weight),
+        max_w=float(cfg.portfolio_dynamic_max_weight),
+    )
+
+    alpha = float(cfg.portfolio_dynamic_smoothing_alpha)
+    alpha = max(0.0, min(alpha, 1.0))
+    if not _portfolio_dynamic_weights:
+        _portfolio_dynamic_weights.update(target)
+    else:
+        blended = {}
+        for s in cfg.symbols:
+            prev = float(_portfolio_dynamic_weights.get(s, cfg.portfolio_weights.get(s, 0.0)) or 0.0)
+            blended[s] = (alpha * float(target.get(s, 0.0))) + ((1.0 - alpha) * prev)
+        _portfolio_dynamic_weights.clear()
+        _portfolio_dynamic_weights.update(
+            _normalize_weights(
+                cfg.symbols,
+                blended,
+                min_w=float(cfg.portfolio_dynamic_min_weight),
+                max_w=float(cfg.portfolio_dynamic_max_weight),
+            )
+        )
+
+    _portfolio_last_rebalance = now
+
+
+def _portfolio_weight_for(cfg: Config, symbol: str) -> float:
+    if not bool(cfg.portfolio_enabled):
+        return 0.0
+    if bool(cfg.portfolio_dynamic_enabled) and _portfolio_dynamic_weights:
+        return float(_portfolio_dynamic_weights.get(symbol, 0.0) or 0.0)
+    return float(cfg.portfolio_weights.get(symbol, 0.0) or 0.0)
+
+
+def _sym_get(cfg: Config, symbol: str, key: str, default):
+    o = cfg.symbol_config.get(symbol, {})
+    if isinstance(o, dict) and key in o:
+        return o[key]
+    return default
+
+
+def _effective_cooldown_minutes(cfg: Config, symbol: str) -> int:
+    cd = int(float(_sym_get(cfg, symbol, "cooldown_minutes", cfg.cooldown_minutes)))
+    if symbol_uses_crypto_relaxed_m15(symbol):
+        fl = int(getattr(cfg, "cooldown_minutes_crypto_floor", 0) or 0)
+        if fl > 0:
+            cd = max(cd, fl)
+    return max(0, cd)
+
+
+def _effective_max_trades_per_hour(cfg: Config, symbol: str) -> int:
+    o = cfg.symbol_config.get(symbol, {})
+    if isinstance(o, dict) and "max_trades_per_hour_per_symbol" in o:
+        return max(0, int(float(o["max_trades_per_hour_per_symbol"])))
+    base = int(getattr(cfg, "max_trades_per_hour_per_symbol", 0) or 0)
+    if base > 0:
+        return base
+    if symbol_uses_crypto_relaxed_m15(symbol):
+        return max(0, int(getattr(cfg, "max_trades_per_hour_crypto_default", 0) or 0))
+    return 0
+
+
+def _prune_symbol_open_timestamps(symbol: str, now: datetime, window_seconds: float) -> None:
+    ls = _symbol_open_timestamps.setdefault(symbol, [])
+    cutoff = now - timedelta(seconds=window_seconds)
+    _symbol_open_timestamps[symbol] = [t for t in ls if t > cutoff]
+
+
+def _count_opens_in_window(symbol: str, now: datetime, window_seconds: float) -> int:
+    _prune_symbol_open_timestamps(symbol, now, window_seconds)
+    return len(_symbol_open_timestamps.get(symbol, []))
+
+
+def _record_symbol_open_timestamp(symbol: str, now: Optional[datetime] = None) -> None:
+    _symbol_open_timestamps.setdefault(symbol, []).append(now or datetime.now())
+
+
+def _broker_min_stop_extra_points(symbol: str) -> int:
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        return 0
+    stops = int(getattr(info, "trade_stops_level", 0) or 0)
+    freeze = int(getattr(info, "trade_freeze_level", 0) or 0)
+    return max(0, stops, freeze)
+
+
+def _effective_params(cfg: Config, symbol: str) -> dict:
+    ac_mult = float(_sym_get(cfg, symbol, "anti_chase_atr_mult", cfg.anti_chase_atr_mult))
+    if symbol_uses_crypto_relaxed_m15(symbol):
+        ac_mult = max(ac_mult, float(getattr(cfg, "anti_chase_atr_mult_crypto_floor", 0.0) or 0.0))
+    return {
+        "sl_money": float(_sym_get(cfg, symbol, "sl_money", cfg.sl_money)),
+        "tp_money": float(_sym_get(cfg, symbol, "tp_money", cfg.tp_money)),
+        "sl_points": float(_sym_get(cfg, symbol, "sl_points", cfg.sl_points)),
+        "tp_points": float(_sym_get(cfg, symbol, "tp_points", cfg.tp_points)),
+        "max_spread_points": float(_sym_get(cfg, symbol, "max_spread_points", cfg.max_spread_points)),
+        "adx_min": float(_sym_get(cfg, symbol, "adx_min", cfg.adx_min)),
+        "range_filter_enabled": bool(_sym_get(cfg, symbol, "range_filter_enabled", cfg.range_filter_enabled)),
+        "range_filter_timeframe": str(_sym_get(cfg, symbol, "range_filter_timeframe", cfg.range_filter_timeframe)),
+        "range_filter_lookback_bars": int(
+            float(_sym_get(cfg, symbol, "range_filter_lookback_bars", cfg.range_filter_lookback_bars))
+        ),
+        "range_filter_mid_frac": float(_sym_get(cfg, symbol, "range_filter_mid_frac", cfg.range_filter_mid_frac)),
+        "candle_filter_enabled": bool(_sym_get(cfg, symbol, "candle_filter_enabled", cfg.candle_filter_enabled)),
+        "candle_body_min_frac": float(_sym_get(cfg, symbol, "candle_body_min_frac", cfg.candle_body_min_frac)),
+        "candle_wick_max_frac": float(_sym_get(cfg, symbol, "candle_wick_max_frac", cfg.candle_wick_max_frac)),
+        "candle_require_confirmation": bool(
+            _sym_get(cfg, symbol, "candle_require_confirmation", cfg.candle_require_confirmation)
+        ),
+        "ema_fast_m15": int(float(_sym_get(cfg, symbol, "ema_fast_m15", cfg.ema_fast_m15))),
+        "ema_slow_m15": int(float(_sym_get(cfg, symbol, "ema_slow_m15", cfg.ema_slow_m15))),
+        "cooldown_minutes": _effective_cooldown_minutes(cfg, symbol),
+        "use_risk_sizing": bool(_sym_get(cfg, symbol, "use_risk_sizing", cfg.use_risk_sizing)),
+        "risk_per_trade_pct": float(_sym_get(cfg, symbol, "risk_per_trade_pct", cfg.risk_per_trade_pct)),
+        "break_even_trigger_money": float(_sym_get(cfg, symbol, "break_even_trigger_money", cfg.break_even_trigger_money)),
+        "trail_trigger_money": float(_sym_get(cfg, symbol, "trail_trigger_money", cfg.trail_trigger_money)),
+        "trail_new_sl_money": float(_sym_get(cfg, symbol, "trail_new_sl_money", cfg.trail_new_sl_money)),
+        "trail_new_tp_money": float(_sym_get(cfg, symbol, "trail_new_tp_money", cfg.trail_new_tp_money)),
+        "max_positions_per_symbol": int(float(_sym_get(cfg, symbol, "max_positions_per_symbol", cfg.max_positions_per_symbol))),
+        "pyramiding_require_be": bool(_sym_get(cfg, symbol, "pyramiding_require_be", cfg.pyramiding_require_be)),
+        "pyramiding_min_separation_points": float(_sym_get(cfg, symbol, "pyramiding_min_separation_points", cfg.pyramiding_min_separation_points)),
+        "anti_chase_enabled": bool(_sym_get(cfg, symbol, "anti_chase_enabled", cfg.anti_chase_enabled)),
+        "anti_chase_atr_mult": ac_mult,
+        "anti_chase_atr_period": int(float(_sym_get(cfg, symbol, "anti_chase_atr_period", cfg.anti_chase_atr_period))),
+        "filter_exit_enabled": bool(_sym_get(cfg, symbol, "filter_exit_enabled", cfg.filter_exit_enabled)),
+        "filter_exit_adx_min": float(_sym_get(cfg, symbol, "filter_exit_adx_min", cfg.filter_exit_adx_min)),
+        "filter_exit_require_ema_reversal": bool(_sym_get(cfg, symbol, "filter_exit_require_ema_reversal", cfg.filter_exit_require_ema_reversal)),
+        "filter_exit_min_profit_money": float(_sym_get(cfg, symbol, "filter_exit_min_profit_money", cfg.filter_exit_min_profit_money)),
+        "tight_trail_enabled": bool(_sym_get(cfg, symbol, "tight_trail_enabled", cfg.tight_trail_enabled)),
+        "tight_trail_trigger_money": float(_sym_get(cfg, symbol, "tight_trail_trigger_money", cfg.tight_trail_trigger_money)),
+        "tight_trail_atr_period": int(float(_sym_get(cfg, symbol, "tight_trail_atr_period", cfg.tight_trail_atr_period))),
+        "tight_trail_atr_mult": float(_sym_get(cfg, symbol, "tight_trail_atr_mult", cfg.tight_trail_atr_mult)),
+        "sl_tp_atr_enabled": bool(_sym_get(cfg, symbol, "sl_tp_atr_enabled", cfg.sl_tp_atr_enabled)),
+        "sl_tp_atr_timeframe": str(_sym_get(cfg, symbol, "sl_tp_atr_timeframe", cfg.sl_tp_atr_timeframe)),
+        "sl_tp_atr_period": int(float(_sym_get(cfg, symbol, "sl_tp_atr_period", cfg.sl_tp_atr_period))),
+        "sl_atr_mult": float(_sym_get(cfg, symbol, "sl_atr_mult", cfg.sl_atr_mult)),
+        "tp_atr_mult": float(_sym_get(cfg, symbol, "tp_atr_mult", cfg.tp_atr_mult)),
+        "sl_tp_atr_min_points": float(_sym_get(cfg, symbol, "sl_tp_atr_min_points", cfg.sl_tp_atr_min_points)),
+        "open_sl_at_entry": bool(_sym_get(cfg, symbol, "open_sl_at_entry", cfg.open_sl_at_entry)),
+        "open_sl_at_entry_max_extra_points": int(
+            float(_sym_get(cfg, symbol, "open_sl_at_entry_max_extra_points", cfg.open_sl_at_entry_max_extra_points))
+        ),
+        "open_sl_at_entry_min_extra_points": int(
+            float(_sym_get(cfg, symbol, "open_sl_at_entry_min_extra_points", cfg.open_sl_at_entry_min_extra_points))
+        ),
+        "profit_lock_enabled": bool(_sym_get(cfg, symbol, "profit_lock_enabled", cfg.profit_lock_enabled)),
+        "profit_lock_step_money": float(_sym_get(cfg, symbol, "profit_lock_step_money", cfg.profit_lock_step_money)),
+        "profit_lock_secure_money": float(_sym_get(cfg, symbol, "profit_lock_secure_money", cfg.profit_lock_secure_money)),
+        "usd_sl_ladder_enabled": bool(cfg.usd_sl_ladder_enabled),
+        "usd_sl_ladder_initial_sl_money": float(
+            _sym_get(cfg, symbol, "usd_sl_ladder_initial_sl_money", cfg.usd_sl_ladder_initial_sl_money)
+        ),
+        "usd_ladder_wait_be_seconds": int(
+            float(_sym_get(cfg, symbol, "usd_ladder_wait_be_seconds", cfg.usd_ladder_wait_be_seconds))
+        ),
+        "usd_ladder_step_seconds": int(float(_sym_get(cfg, symbol, "usd_ladder_step_seconds", cfg.usd_ladder_step_seconds))),
+        "usd_ladder_max_lock_usd": int(float(_sym_get(cfg, symbol, "usd_ladder_max_lock_usd", cfg.usd_ladder_max_lock_usd))),
+        "micro_be_trigger_money": float(_sym_get(cfg, symbol, "micro_be_trigger_money", cfg.micro_be_trigger_money)),
+        "hwm_trail_pct": float(_sym_get(cfg, symbol, "hwm_trail_pct", cfg.hwm_trail_pct)),
+        "stagnant_timeout_minutes": float(
+            _sym_get(cfg, symbol, "stagnant_timeout_minutes", getattr(cfg, "stagnant_timeout_minutes", 0.0))
+        ),
+        "stagnant_max_profit_threshold": float(
+            _sym_get(cfg, symbol, "stagnant_max_profit_threshold", getattr(cfg, "stagnant_max_profit_threshold", 0.0))
+        ),
+        "max_lot_per_trade": float(_sym_get(cfg, symbol, "max_lot_per_trade", getattr(cfg, "max_lot_per_trade", 0.0))),
+        "price_slope_filter_enabled": bool(
+            _sym_get(cfg, symbol, "price_slope_filter_enabled", cfg.price_slope_filter_enabled)
+        ),
+        "price_slope_n": max(
+            2,
+            int(float(_sym_get(cfg, symbol, "price_slope_n", getattr(cfg, "price_slope_n", 6)))),
+        ),
+        "rsi_h4_filter_enabled": bool(_sym_get(cfg, symbol, "rsi_h4_filter_enabled", False)),
+        "rsi_h4_oversold_threshold": float(_sym_get(cfg, symbol, "rsi_h4_oversold_threshold", 35.0)),
+        "rsi_h4_overbought_threshold": float(_sym_get(cfg, symbol, "rsi_h4_overbought_threshold", 65.0)),
+        "extension_filter_max_pct": float(_sym_get(cfg, symbol, "extension_filter_max_pct", 4.0)),
+        "extension_filter_h1_bars": int(float(_sym_get(cfg, symbol, "extension_filter_h1_bars", 16))),
+        "max_trades_per_hour_per_symbol": _effective_max_trades_per_hour(cfg, symbol),
+    }
+
+
+def _preflight_new_entry(
+    cfg: Config,
+    symbol: str,
+    *,
+    side: Signal,
+    now: datetime,
+    adx: Optional[float],
+    p: dict,
+    active: Optional[bool],
+    ok_spread: bool,
+    spread: Optional[float],
+    avg_spread: Optional[float],
+) -> bool:
+    if side not in ("BUY", "SELL"):
+        return False
+
+    if not _session_allows_new_trade(cfg, symbol, now):
+        reason = "session/calendar gate (weekend/window/cutoff)"
+        if (
+            cfg.quiet_session_block_enabled
+            and cfg.quiet_session_hours
+            and now.hour in cfg.quiet_session_hours
+            and symbol not in cfg.quiet_session_exempt_symbols
+        ):
+            reason = f"quiet session (hour={now.hour:02d}h, low liquidity for FX)"
+            _log_event(
+                {
+                    "event": "QUIET_SESSION_SKIP",
+                    "ts": now.isoformat(timespec="seconds"),
+                    "symbol": symbol,
+                    "hour": now.hour,
+                    "quiet_hours": list(cfg.quiet_session_hours),
+                    "exempt_symbols": list(cfg.quiet_session_exempt_symbols),
+                }
+            )
+        logging.info("[%s] No trade: %s.", symbol, reason)
+        return False
+
+    if not _can_trade(cfg, symbol, now):
+        logging.info(
+            "[%s] No trade: cooldown active (effective %d min since last open).",
+            symbol,
+            _effective_cooldown_minutes(cfg, symbol),
+        )
+        return False
+
+    if _failed_order_attempt_cooldown_blocks(cfg, symbol, now):
+        sec = float(cfg.failed_attempt_cooldown_seconds or 0.0)
+        last_f = _last_failed_order_attempt.get(symbol)
+        ago = (now - last_f).total_seconds() if last_f is not None else 0.0
+        logging.info(
+            "[%s] No trade: failed-order cooldown active (%.0f s since broker rejection; block %.0f s).",
+            symbol,
+            ago,
+            sec,
+        )
+        return False
+
+    if active is False:
+        logging.info("[%s] No trade: market inactive (avg range filter).", symbol)
+        return False
+
+    if not ok_spread:
+        if spread is None:
+            logging.warning("[%s] Could not read spread. Skipping.", symbol)
+        elif cfg.spread_dynamic_enabled and avg_spread is not None:
+            logging.info(
+                "[%s] No trade: spread gate failed (now=%.1f avg=%.1f mult=%.2f hard_max=%.1f).",
+                symbol,
+                spread,
+                avg_spread,
+                cfg.spread_dynamic_mult,
+                float(p["max_spread_points"]),
+            )
+        else:
+            logging.info("[%s] No trade: spread gate failed.", symbol)
+        return False
+
+    if _count_managed_open_positions(cfg) >= cfg.max_open_trades_total:
+        logging.info("[%s] No trade: max total open positions (gestionadas por bot) reached.", symbol)
+        return False
+
+    adx_min = float(p["adx_min"])
+    if adx is None or adx < adx_min:
+        logging.info("[%s] No trade: ADX low (%.2f < %.2f) → lateral.", symbol, adx if adx is not None else 0.0, adx_min)
+        return False
+
+    if bool(p.get("range_filter_enabled", False)):
+        ok_range, m = _range_filter_allows_entry(
+            symbol,
+            timeframe=str(p.get("range_filter_timeframe", "H1") or "H1"),
+            lookback_bars=int(p.get("range_filter_lookback_bars", 24) or 24),
+            mid_frac=float(p.get("range_filter_mid_frac", 0.30) or 0.30),
+        )
+        if not ok_range:
+            _log_event(
+                {
+                    "event": "RANGE_FILTER_SKIP",
+                    "ts": now.isoformat(timespec="seconds"),
+                    "symbol": symbol,
+                    "timeframe": str(p.get("range_filter_timeframe", "H1") or "H1"),
+                    "lookback_bars": int(p.get("range_filter_lookback_bars", 24) or 24),
+                    "mid_frac": float(p.get("range_filter_mid_frac", 0.30) or 0.30),
+                    **m,
+                }
+            )
+            logging.info("[%s] No trade: range filter (near mid of recent range).", symbol)
+            return False
+
+    if bool(p.get("candle_filter_enabled", False)):
+        ok_candle, cm = _passes_candle_strength_filter(
+            symbol,
+            side=side,
+            body_min_frac=float(p.get("candle_body_min_frac", 0.60) or 0.60),
+            wick_max_frac=float(p.get("candle_wick_max_frac", 0.35) or 0.35),
+            require_confirmation=bool(p.get("candle_require_confirmation", False)),
+        )
+        if not ok_candle:
+            _log_event(
+                {
+                    "event": "CANDLE_FILTER_SKIP",
+                    "ts": now.isoformat(timespec="seconds"),
+                    "symbol": symbol,
+                    "side": side,
+                    **cm,
+                }
+            )
+            logging.info("[%s] No trade: candle filter rejected entry candle.", symbol)
+            return False
+
+    return True
+
+
+def _setup_logging() -> None:
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    if logger.handlers:
+        return
+
+    fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    logger.addHandler(sh)
+
+    fh = logging.FileHandler(_TRADES_LOG_FILENAME, encoding="utf-8")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+
+
+def _rotate_trades_log_on_start(*, logs_dir: str = "logs") -> None:
+    src = _TRADES_LOG_FILENAME
+    try:
+        if not os.path.isfile(src):
+            return
+        if os.path.getsize(src) <= 0:
+            return
+
+        os.makedirs(logs_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        dst = os.path.join(logs_dir, f"trades_{stamp}.log")
+
+        os.replace(src, dst)
+
+        with open(src, "w", encoding="utf-8"):
+            pass
+    except Exception:
+        try:
+            logging.exception("Failed to rotate trades.log on start.")
+        except Exception:
+            pass
+
+
+def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+    v = os.getenv(name)
+    if v is None or v.strip() == "":
+        return default
+    return v.strip()
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = _env(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _maybe_market_regime_detector(cfg: Config):
+    if not _env_bool("BOT_MARKET_REGIME_ENABLED", True):
+        return None
+    try:
+        from market_regime import MarketRegimeDetector
+
+        interval = float(os.getenv("BOT_MARKET_REGIME_CHECK_INTERVAL_SEC") or "900")
+        adx_trending = float(os.getenv("BOT_MARKET_REGIME_ADX_TRENDING") or "28")
+        adx_ranging = float(os.getenv("BOT_MARKET_REGIME_ADX_RANGING") or "22")
+        return MarketRegimeDetector(
+            cfg,
+            check_interval_s=interval,
+            adx_trending=adx_trending,
+            adx_ranging=adx_ranging,
+            notify_module=telegram_notify,
+        )
+    except Exception:
+        logging.exception("MarketRegimeDetector no disponible; continuando sin régimen.")
+        return None
+
+
+def _env_int_list(name: str) -> Tuple[int, ...]:
+    v = _env(name)
+    if v is None:
+        return ()
+    out: list[int] = []
+    for part in v.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(int(part))
+        except ValueError:
+            continue
+    return tuple(out)
+
+
+def _env_str_list(name: str) -> Optional[Tuple[str, ...]]:
+    v = _env(name)
+    if v is None:
+        return None
+    parts = [p.strip() for p in v.split(",") if p.strip()]
+    if not parts:
+        return None
+    return tuple(parts)
+
+
+def _parse_hh_mm_token(tok: str) -> dt_time:
+    tok = tok.strip()
+    comps = tok.split(":")
+    h = int(comps[0])
+    mi = int(comps[1]) if len(comps) > 1 else 0
+    return dt_time(h % 24, mi % 60)
+
+
+def parse_trading_window_sessions(raw: str) -> Tuple[Tuple[dt_time, dt_time], ...]:
+    s = raw.strip()
+    if not s:
+        return ()
+    out: list[Tuple[dt_time, dt_time]] = []
+    for chunk in s.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        left, dash, right = chunk.partition("-")
+        if dash != "-":
+            raise ValueError(f"segment without '-': {chunk!r}")
+        out.append((_parse_hh_mm_token(left), _parse_hh_mm_token(right)))
+    return tuple(out)
+
+
+def _load_trading_window_sessions_from_env() -> Tuple[Tuple[dt_time, dt_time], ...]:
+    raw = os.getenv("BOT_TRADING_WINDOW_SESSIONS")
+    if raw is None or raw.strip() == "":
+        return ()
+    try:
+        return parse_trading_window_sessions(raw)
+    except Exception:
+        logging.exception("BOT_TRADING_WINDOW_SESSIONS inválido; usando start_hour/end_hour sin franjas.")
+        return ()
+
+
+def _clock_minutes_of_day_for_trading_window(cfg: Config, wall_now: datetime) -> float:
+    z = (cfg.trading_window_timezone or "LOCAL").strip().upper()
+    if z in ("UTC", "GMT", "GREENWICH"):
+        u = datetime.now(timezone.utc)
+        return u.hour * 60.0 + u.minute + u.second / 60.0 + u.microsecond / 60_000_000.0
+    return wall_now.hour * 60.0 + wall_now.minute + wall_now.second / 60.0 + wall_now.microsecond / 60_000_000.0
+
+
+def _session_minute_inclusive_ranges(sessions: Tuple[Tuple[dt_time, dt_time], ...]) -> list[Tuple[float, float]]:
+    bounds: list[Tuple[float, float]] = []
+    for ta, tb in sessions:
+        a = ta.hour * 60.0 + ta.minute
+        b = tb.hour * 60.0 + tb.minute
+        bounds.append((a, b))
+    return bounds
+
+
+def _within_trading_window_sessions(cfg: Config, wall_now: datetime) -> bool:
+    if not cfg.trading_window_sessions:
+        return True
+    mm = _clock_minutes_of_day_for_trading_window(cfg, wall_now)
+    for lo, hi in _session_minute_inclusive_ranges(cfg.trading_window_sessions):
+        if lo <= mm <= hi:
+            return True
+    return False
+
+
+def _within_symbol_sessions(
+    sessions_str: str,
+    cfg: Config,
+    wall_now: datetime,
+) -> bool:
+    try:
+        sessions = parse_trading_window_sessions(sessions_str)
+    except Exception:
+        logging.warning("trading_window_sessions inválido para símbolo: %r — ignorado.", sessions_str)
+        return True
+    if not sessions:
+        return True
+    mm = _clock_minutes_of_day_for_trading_window(cfg, wall_now)
+    for ta, tb in sessions:
+        lo = ta.hour * 60.0 + ta.minute
+        hi = tb.hour * 60.0 + tb.minute
+        if lo <= hi:
+            if lo <= mm <= hi:
+                return True
+        else:
+            if mm >= lo or mm <= hi:
+                return True
+    return False
+
+
+def _is_news_time(cfg: Config, now: Optional[datetime] = None) -> bool:
+    if not cfg.news_block_hours:
+        return False
+    now = now or datetime.now()
+    return now.hour in cfg.news_block_hours
+
+
+def _update_spread_stats(cfg: Config, symbol: str, spread_points: float) -> float:
+    prev = _spread_ema_points.get(symbol)
+    if prev is None:
+        _spread_ema_points[symbol] = float(spread_points)
+        return float(spread_points)
+    alpha = max(0.01, min(cfg.spread_dynamic_alpha, 1.0))
+    ema = (alpha * float(spread_points)) + ((1.0 - alpha) * float(prev))
+    _spread_ema_points[symbol] = float(ema)
+    return float(ema)
+
+
+def _is_spread_ok(cfg: Config, symbol: str, *, max_spread_points: Optional[float] = None) -> tuple[bool, Optional[float], Optional[float]]:
+    spread = _get_spread_points(symbol)
+    if spread is None:
+        return False, None, None
+
+    avg = _update_spread_stats(cfg, symbol, spread)
+
+    hard_max = float(max_spread_points) if max_spread_points is not None else float(cfg.max_spread_points)
+    if spread > hard_max:
+        return False, spread, avg
+
+    if cfg.spread_dynamic_enabled and avg > 0:
+        if spread > (cfg.spread_dynamic_mult * avg):
+            return False, spread, avg
+
+    return True, spread, avg
+
+
+def _can_trade(cfg: Config, symbol: str, now: Optional[datetime] = None) -> bool:
+    now = now or datetime.now()
+    last = _last_trade_time.get(symbol)
+    if last is None:
+        return True
+    minutes = float(_effective_cooldown_minutes(cfg, symbol))
+    return (now - last).total_seconds() >= minutes * 60.0
+
+
+def _record_failed_order_attempt(symbol: str, cfg: Optional[Config] = None, result: Any = None) -> None:
+    _last_failed_order_attempt[symbol] = datetime.now()
+    if cfg is not None:
+        logging.info(
+            "[%s] Failed order cooldown activado (retcode=%s). Próximo intento en %.0fs.",
+            symbol,
+            getattr(result, "retcode", "?") if result is not None else "?",
+            float(cfg.failed_attempt_cooldown_seconds or 120),
+        )
+
+
+def _failed_order_attempt_cooldown_blocks(cfg: Config, symbol: str, now: datetime) -> bool:
+    sec = float(getattr(cfg, "failed_attempt_cooldown_seconds", 0.0) or 0.0)
+    if sec <= 0:
+        return False
+    last = _last_failed_order_attempt.get(symbol)
+    if last is None:
+        return False
+    return (now - last).total_seconds() < sec
+
+
+def _clamp_volume(symbol: str, volume: float) -> float:
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        return max(0.01, round(volume, 2))
+
+    vmin = float(getattr(info, "volume_min", 0.01) or 0.01)
+    vmax = float(getattr(info, "volume_max", 100.0) or 100.0)
+    vstep = float(getattr(info, "volume_step", 0.01) or 0.01)
+
+    vol = max(vmin, min(volume, vmax))
+    if vstep > 0:
+        steps = round(vol / vstep)
+        vol = steps * vstep
+    return float(f"{vol:.2f}")
+
+
+def calculate_lot_by_risk(symbol: str, risk_pct: float, sl_money_at_base_lot: float, base_lot: float) -> float:
+    acc = mt5.account_info()
+    if acc is None:
+        return _clamp_volume(symbol, base_lot)
+
+    balance = float(getattr(acc, "balance", 0.0) or 0.0)
+    risk_amount = balance * (max(0.0, risk_pct) / 100.0)
+    if risk_amount <= 0 or abs(sl_money_at_base_lot) <= 0:
+        return _clamp_volume(symbol, base_lot)
+
+    lot = base_lot * (risk_amount / abs(sl_money_at_base_lot))
+    return _clamp_volume(symbol, lot)
+
+
+def connect_mt5(cfg: Config) -> bool:
+    login_raw = _env("MT5_LOGIN")
+    password = _env("MT5_PASSWORD")
+    server = _env("MT5_SERVER")
+
+    if login_raw is None or password is None or server is None:
+        logging.error(
+            "Missing env vars. Please set MT5_LOGIN, MT5_PASSWORD, MT5_SERVER (use .env.example)."
+        )
+        return False
+
+    try:
+        login = int(login_raw)
+    except ValueError:
+        logging.error("MT5_LOGIN must be an integer (account number). Got: %r", login_raw)
+        return False
+
+    last_err = None
+    for attempt in range(1, cfg.connect_retries + 1):
+        try:
+            ok = mt5.initialize(login=login, password=password, server=server)
+            if ok:
+                acc = mt5.account_info()
+                term = mt5.terminal_info()
+                logging.info(
+                    "Connected to MT5. Account=%s | Name=%s | Server=%s | Currency=%s | Terminal=%s",
+                    getattr(acc, "login", "?"),
+                    getattr(acc, "name", "?"),
+                    getattr(acc, "server", "?"),
+                    getattr(acc, "currency", "?"),
+                    getattr(term, "name", "?"),
+                )
+                return True
+
+            last_err = mt5.last_error()
+            logging.warning("MT5 initialize failed (attempt %d/%d). last_error=%s", attempt, cfg.connect_retries, last_err)
+        except Exception as e:
+            last_err = e
+            logging.exception("Exception during MT5 initialize (attempt %d/%d).", attempt, cfg.connect_retries)
+
+        time.sleep(cfg.connect_retry_sleep)
+
+    logging.error("Could not connect to MT5 after retries. Last error: %r", last_err)
+    return False
+
+
+def _session_allows_new_trade(cfg: Config, symbol: str, now: Optional[datetime] = None) -> bool:
+    now = now or datetime.now()
+    wd = now.weekday()
+
+    if cfg.weekend_block_enabled and wd in (5, 6):
+        if symbol not in cfg.weekend_trade_symbols:
+            return False
+
+    if cfg.friday_cutoff_enabled:
+        if wd == 4 and now.hour >= cfg.end_hour and (now.hour > cfg.end_hour or now.minute >= 0):
+            return False
+
+    if cfg.trading_window_enabled:
+        sym_sessions_str = str(_sym_get(cfg, symbol, "trading_window_sessions", "") or "").strip()
+        if sym_sessions_str:
+            if not _within_symbol_sessions(sym_sessions_str, cfg, now):
+                return False
+        elif symbol in cfg.weekend_trade_symbols:
+            pass
+        elif cfg.trading_window_sessions:
+            if not _within_trading_window_sessions(cfg, now):
+                return False
+        else:
+            if now.hour < cfg.start_hour:
+                return False
+            if now.hour > cfg.end_hour:
+                return False
+
+    if cfg.quiet_session_block_enabled and cfg.quiet_session_hours:
+        if now.hour in cfg.quiet_session_hours and symbol not in cfg.quiet_session_exempt_symbols:
+            return False
+
+    return True
+
+
+def _is_new_trade_cutoff(cfg: Config, now: Optional[datetime] = None) -> bool:
+    if not cfg.new_trade_cutoff_enabled:
+        return False
+    now = now or datetime.now()
+    if now.hour > cfg.no_new_trades_after_hour:
+        return True
+    if now.hour == cfg.no_new_trades_after_hour and now.minute >= cfg.no_new_trades_after_minute:
+        return True
+    return False
+
+
+def _ensure_symbol(symbol: str) -> bool:
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        logging.error("Symbol not found in MT5: %s", symbol)
+        return False
+    if not info.visible:
+        if not mt5.symbol_select(symbol, True):
+            logging.error("Could not select/enable symbol: %s", symbol)
+            return False
+    return True
+
+
+def _get_spread_points(symbol: str) -> Optional[float]:
+    tick = mt5.symbol_info_tick(symbol)
+    info = mt5.symbol_info(symbol)
+    if tick is None or info is None or info.point == 0:
+        return None
+    return (tick.ask - tick.bid) / info.point
+
+
+def get_trend_h4(symbol: str) -> Trend:
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H4, 1, 7)
+    if rates is None or len(rates) < 6:
+        logging.warning("[%s] Not enough H4 data for trend.", symbol)
+        return "FLAT"
+
+    closes = [float(r["close"]) for r in rates[-6:]]
+    return trend_h4_from_closes(closes)
+
+
+def get_rsi_h4(symbol: str, period: int = 14) -> Optional[float]:
+    bars_needed = period * 2 + 2
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H4, 1, bars_needed)
+    if rates is None or len(rates) < period + 1:
+        logging.debug("[%s] Not enough H4 data for RSI.", symbol)
+        return None
+    closes = [float(r["close"]) for r in rates]
+    return rsi_from_closes(closes, period=period)
+
+
+def _movement_is_extended(
+    symbol: str,
+    side: Signal,
+    *,
+    lookback_h1_bars: int = 16,
+    max_extension_pct: float = 4.0,
+) -> bool:
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 1, lookback_h1_bars)
+    if rates is None or len(rates) < 2:
+        return False
+
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        return False
+    current_price = float(tick.bid)
+
+    if side == "SELL":
+        recent_high = max(float(r["high"]) for r in rates)
+        if recent_high <= 0:
+            return False
+        drop_pct = (recent_high - current_price) / recent_high * 100.0
+        return drop_pct > max_extension_pct
+
+    if side == "BUY":
+        recent_low = min(float(r["low"]) for r in rates)
+        if recent_low <= 0:
+            return False
+        rise_pct = (current_price - recent_low) / recent_low * 100.0
+        return rise_pct > max_extension_pct
+
+    return False
+
+
+def log_h4_snapshot_for_symbol(cfg: Config, symbol: str, *, trend_h4: Trend) -> None:
+    ema50_h4 = get_ema(symbol, mt5.TIMEFRAME_H4, 50)
+    ema200_h4 = get_ema(symbol, mt5.TIMEFRAME_H4, 200)
+    e50_s = f"{ema50_h4:.5f}" if ema50_h4 is not None else "n/a"
+    e200_s = f"{ema200_h4:.5f}" if ema200_h4 is not None else "n/a"
+    relaxed = symbol_uses_crypto_relaxed_m15(symbol)
+    req = bool(cfg.crypto_sell_requires_h4_down)
+    sell_allowed = (trend_h4 == "DOWN") if relaxed and req else True
+    logging.info(
+        "[%s] H4 trend: %s | ema50_h4=%s ema200_h4=%s | sell_allowed=%s",
+        symbol,
+        trend_h4,
+        e50_s,
+        e200_s,
+        str(sell_allowed),
+    )
+
+
+def get_signal_m15(symbol: str) -> Signal:
+    sym_u = symbol.upper()
+    is_crypto_relaxed = symbol_uses_crypto_relaxed_m15(sym_u)
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, 3)
+    if rates is None or len(rates) < 2:
+        logging.warning("[%s] Not enough M15 data for signal.", symbol)
+        return "NONE"
+
+    last = rates[0]
+    prev = rates[1]
+
+    last_open = float(last["open"])
+    last_close = float(last["close"])
+    last_high = float(last["high"])
+    last_low = float(last["low"])
+    prev_high = float(prev["high"])
+    prev_low = float(prev["low"])
+    prev_close = float(prev["close"])
+
+    if last_close > last_open and last_close > prev_high:
+        return "BUY"
+    if last_close < last_open and last_close < prev_low:
+        return "SELL"
+
+    if not is_crypto_relaxed:
+        return "NONE"
+
+    if last_close > last_open and last_close > prev_close and last_high > prev_high:
+        return "BUY"
+    if last_close < last_open and last_close < prev_close and last_low < prev_low:
+        return "SELL"
+
+    if last_close > last_open and last_close > prev_close:
+        return "BUY"
+    return "NONE"
+
+
+def get_m15_closed_closes(symbol: str, count: int) -> Optional[list[float]]:
+    if count < 1:
+        return None
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, count)
+    if rates is None or len(rates) < count:
+        return None
+    return [float(r["close"]) for r in reversed(rates)]
+
+
+def _m15_slope_trend(symbol: str, *, n_closes: int) -> Trend:
+    need = max(int(n_closes), 2)
+    seq = get_m15_closed_closes(symbol, need)
+    if seq is None:
+        return "FLAT"
+    return price_slope_m15(seq, n=int(n_closes))
+
+
+def _passes_candle_strength_filter(
+    symbol: str,
+    *,
+    side: Signal,
+    body_min_frac: float,
+    wick_max_frac: float,
+    require_confirmation: bool,
+) -> tuple[bool, dict[str, float]]:
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, 3)
+    if rates is None or len(rates) < 2:
+        return True, {}
+
+    last = rates[0]
+    prev = rates[1]
+
+    o = float(last["open"])
+    h = float(last["high"])
+    l = float(last["low"])
+    c = float(last["close"])
+
+    rng = max(0.0, h - l)
+    if rng <= 0:
+        return True, {}
+
+    body = abs(c - o)
+    upper_wick = max(0.0, h - max(o, c))
+    lower_wick = max(0.0, min(o, c) - l)
+
+    body_frac = body / rng
+    upper_wick_frac = upper_wick / rng
+    lower_wick_frac = lower_wick / rng
+
+    if side == "BUY" and c <= o:
+        return False, {"body_frac": body_frac, "uw_frac": upper_wick_frac, "lw_frac": lower_wick_frac}
+    if side == "SELL" and c >= o:
+        return False, {"body_frac": body_frac, "uw_frac": upper_wick_frac, "lw_frac": lower_wick_frac}
+
+    ok = (body_frac >= float(body_min_frac)) and (upper_wick_frac <= float(wick_max_frac)) and (lower_wick_frac <= float(wick_max_frac))
+
+    if ok and require_confirmation:
+        po = float(prev["open"])
+        pc = float(prev["close"])
+        if side == "BUY":
+            ok = (pc > po) and (c > pc)
+        else:
+            ok = (pc < po) and (c < pc)
+
+    return bool(ok), {"body_frac": body_frac, "uw_frac": upper_wick_frac, "lw_frac": lower_wick_frac}
+
+
+def _range_filter_allows_entry(
+    symbol: str,
+    *,
+    timeframe: str,
+    lookback_bars: int,
+    mid_frac: float,
+) -> tuple[bool, dict[str, float]]:
+    tf = _mt5_timeframe(timeframe)
+    n = max(5, int(lookback_bars))
+    rates = mt5.copy_rates_from_pos(symbol, tf, 1, n)
+    tick = mt5.symbol_info_tick(symbol)
+    if rates is None or len(rates) < 5 or tick is None:
+        return True, {}
+
+    highs = [float(r["high"]) for r in rates]
+    lows = [float(r["low"]) for r in rates]
+    hi = max(highs)
+    lo = min(lows)
+    rng = max(0.0, hi - lo)
+    if rng <= 0:
+        return True, {}
+
+    mid = (hi + lo) / 2.0
+    price = float(getattr(tick, "bid", 0.0) or 0.0)
+    if price <= 0:
+        return True, {}
+
+    dist_mid = abs(price - mid)
+    dist_mid_frac = dist_mid / rng
+
+    ok = dist_mid_frac >= float(mid_frac)
+    return bool(ok), {"range_hi": hi, "range_lo": lo, "range_mid": mid, "dist_mid_frac": dist_mid_frac}
+
+
+def _range_filter_signal_snapshot(symbol: str, p: dict) -> dict[str, Any]:
+    mid_thr = float(p.get("range_filter_mid_frac", 0.30) or 0.30)
+    if not bool(p.get("range_filter_enabled", False)):
+        return {
+            "range_filter_result": "disabled",
+            "range_filter_dist_mid_frac": None,
+            "range_filter_mid_frac": mid_thr,
+        }
+    ok, m = _range_filter_allows_entry(
+        symbol,
+        timeframe=str(p.get("range_filter_timeframe", "H1") or "H1"),
+        lookback_bars=int(p.get("range_filter_lookback_bars", 24) or 24),
+        mid_frac=mid_thr,
+    )
+    if not m:
+        return {
+            "range_filter_result": "passed",
+            "range_filter_dist_mid_frac": None,
+            "range_filter_mid_frac": mid_thr,
+        }
+    dist = m.get("dist_mid_frac")
+    return {
+        "range_filter_result": "blocked" if not ok else "passed",
+        "range_filter_dist_mid_frac": float(dist) if dist is not None else None,
+        "range_filter_mid_frac": mid_thr,
+    }
+
+
+def _ema(values: list[float], period: int) -> Optional[float]:
+    if period <= 0 or len(values) < period:
+        return None
+    k = 2.0 / (period + 1.0)
+    ema = sum(values[:period]) / float(period)
+    for v in values[period:]:
+        ema = (v * k) + (ema * (1.0 - k))
+    return float(ema)
+
+
+def get_ema(symbol: str, timeframe, period: int = 50) -> Optional[float]:
+    count = max(period + 10, period)
+    rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, count)
+    if rates is None or len(rates) < period:
+        logging.warning("[%s] Not enough data for EMA.", symbol)
+        return None
+
+    closes = [float(r["close"]) for r in rates]
+    return _ema(closes, period)
+
+
+def ema_filter(symbol: str, period: int = 50) -> Signal:
+    ema = get_ema(symbol, mt5.TIMEFRAME_M15, period)
+    tick = mt5.symbol_info_tick(symbol)
+    if ema is None or tick is None:
+        return "NONE"
+
+    price = float(tick.bid)
+    if price > ema:
+        return "BUY"
+    if price < ema:
+        return "SELL"
+    return "NONE"
+
+
+def _is_market_active_m15(symbol: str, min_avg_range_points: float) -> Optional[bool]:
+    if min_avg_range_points <= 0:
+        return True
+
+    info = mt5.symbol_info(symbol)
+    if info is None or not info.point:
+        return None
+
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, 10)
+    if rates is None or len(rates) < 5:
+        return None
+
+    ranges_points = [(float(r["high"]) - float(r["low"])) / float(info.point) for r in rates]
+    avg_range_points = sum(ranges_points) / float(len(ranges_points))
+    return avg_range_points >= min_avg_range_points
+
+
+def get_adx(symbol: str, timeframe, period: int = 14) -> Optional[float]:
+    count = max((2 * period) + 60, (2 * period) + 5)
+    rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, count)
+    if rates is None or len(rates) < (2 * period) + 5:
+        return None
+
+    highs = [float(r["high"]) for r in rates]
+    lows = [float(r["low"]) for r in rates]
+    closes = [float(r["close"]) for r in rates]
+
+    r = adx_wilder(highs, lows, closes, period=period)
+    v = r.adx[-1] if r.adx else None
+    return float(v) if v is not None else None
+
+
+def _mt5_timeframe(tf: str):
+    tf = (tf or "").strip().upper()
+    mapping = {
+        "M1": mt5.TIMEFRAME_M1,
+        "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "M30": mt5.TIMEFRAME_M30,
+        "H1": mt5.TIMEFRAME_H1,
+        "H4": mt5.TIMEFRAME_H4,
+        "D1": mt5.TIMEFRAME_D1,
+    }
+    return mapping.get(tf, mt5.TIMEFRAME_M15)
+
+
+def get_atr(symbol: str, timeframe, period: int = 14) -> Optional[float]:
+    count = max(period + 20, period + 5)
+    rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, count)
+    if rates is None or len(rates) < period + 1:
+        return None
+
+    trs: list[float] = []
+    prev_close = float(rates[0]["close"])
+    for r in rates[1:]:
+        h = float(r["high"])
+        l = float(r["low"])
+        tr = max(h - l, abs(h - prev_close), abs(l - prev_close))
+        trs.append(tr)
+        prev_close = float(r["close"])
+
+    if len(trs) < period:
+        return None
+
+    atr = sum(trs[:period]) / float(period)
+    for tr in trs[period:]:
+        atr = ((atr * (period - 1)) + tr) / float(period)
+    return float(atr) if atr > 0 else None
+
+
+def get_last_m15_bar_range(symbol: str) -> Optional[float]:
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, 1)
+    if rates is None or len(rates) < 1:
+        return None
+    last = rates[0]
+    rng = float(last["high"]) - float(last["low"])
+    return rng if rng > 0 else None
+
+
+def _m15_bar_at_time(symbol: str, ts: datetime) -> Optional[dict]:
+    if ts is None:
+        return None
+    from_ts = ts - timedelta(minutes=30)
+    to_ts = ts + timedelta(minutes=30)
+    rates = mt5.copy_rates_range(symbol, mt5.TIMEFRAME_M15, from_ts, to_ts)
+    if rates is None or len(rates) == 0:
+        return None
+    target = int(ts.timestamp())
+    for r in rates:
+        bar_start = int(r["time"])
+        if bar_start <= target < bar_start + 15 * 60:
+            return {
+                "open": float(r["open"]),
+                "high": float(r["high"]),
+                "low": float(r["low"]),
+                "close": float(r["close"]),
+                "time": bar_start,
+            }
+    rates_sorted = sorted(rates, key=lambda r: int(r["time"]))
+    for r in reversed(rates_sorted):
+        if int(r["time"]) <= target:
+            return {
+                "open": float(r["open"]),
+                "high": float(r["high"]),
+                "low": float(r["low"]),
+                "close": float(r["close"]),
+                "time": int(r["time"]),
+            }
+    return None
+
+
+def _compute_trade_grades(
+    symbol: str,
+    side: str,
+    price_open: Optional[float],
+    price_close: Optional[float],
+    opened_at_iso: Optional[str],
+    closed_at_iso: Optional[str],
+) -> dict:
+    out: dict[str, Any] = {"entry_grade": None, "exit_grade": None, "trade_grade": None}
+    if side not in ("BUY", "SELL"):
+        return out
+    if price_open is None or price_close is None:
+        return out
+
+    def _parse(iso: Optional[str]) -> Optional[datetime]:
+        if not iso:
+            return None
+        try:
+            return datetime.fromisoformat(iso)
+        except Exception:
+            return None
+
+    open_dt = _parse(opened_at_iso)
+    close_dt = _parse(closed_at_iso)
+
+    if open_dt is not None:
+        bar = _m15_bar_at_time(symbol, open_dt)
+        if bar is not None:
+            rng = bar["high"] - bar["low"]
+            if rng > 0:
+                if side == "BUY":
+                    grade = (bar["high"] - float(price_open)) / rng
+                else:
+                    grade = (float(price_open) - bar["low"]) / rng
+                out["entry_grade"] = round(max(0.0, min(1.0, grade)) * 100.0, 1)
+
+    if close_dt is not None:
+        bar = _m15_bar_at_time(symbol, close_dt)
+        if bar is not None:
+            rng = bar["high"] - bar["low"]
+            if rng > 0:
+                if side == "BUY":
+                    grade = (float(price_close) - bar["low"]) / rng
+                else:
+                    grade = (bar["high"] - float(price_close)) / rng
+                out["exit_grade"] = round(max(0.0, min(1.0, grade)) * 100.0, 1)
+
+    try:
+        atr = get_atr(symbol, mt5.TIMEFRAME_M15, 20)
+    except Exception:
+        atr = None
+    if atr is not None and atr > 0:
+        channel_height = atr * 4.0
+        profit_price = (float(price_close) - float(price_open)) if side == "BUY" else (float(price_open) - float(price_close))
+        grade = profit_price / channel_height
+        out["trade_grade"] = round(max(-1.0, min(1.0, grade)) * 100.0, 1)
+
+    return out
+
+
+def ema_trend(symbol: str, fast: int = 50, slow: int = 200) -> Trend:
+    ema_fast = get_ema(symbol, mt5.TIMEFRAME_M15, fast)
+    ema_slow = get_ema(symbol, mt5.TIMEFRAME_M15, slow)
+    tick = mt5.symbol_info_tick(symbol)
+    if ema_fast is None or ema_slow is None or tick is None:
+        return "FLAT"
+
+    price = float(tick.bid)
+    if ema_fast > ema_slow and price > ema_fast:
+        return "UP"
+    if ema_fast < ema_slow and price < ema_fast:
+        return "DOWN"
+    return "FLAT"
+
+
+def _price_distance_for_money(symbol: str, lot: float, money: float, direction: Signal) -> Optional[float]:
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        return None
+
+    tick_value = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+    tick_size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+
+    if tick_value <= 0 or tick_size <= 0 or lot <= 0:
+        return None
+
+    distance = abs(money) * tick_size / (tick_value * lot)
+
+    point = float(info.point) if info.point else 0.0
+    if point > 0:
+        distance = math.ceil(distance / point) * point
+
+    return distance
+
+
+def _sl_price_for_max_loss_usd(
+    symbol: str,
+    side: Signal,
+    entry_price: float,
+    lot: float,
+    loss_usd: float,
+    *,
+    digits: int,
+) -> Optional[float]:
+    if entry_price <= 0 or lot <= 0 or loss_usd <= 0:
+        return None
+    d = _price_distance_for_money(symbol, lot, float(loss_usd), side)
+    if d is None or d <= 0:
+        return None
+    if side == "BUY":
+        return round(entry_price - d, int(digits))
+    return round(entry_price + d, int(digits))
+
+
+def _position_age_seconds(p) -> float:
+    t = getattr(p, "time", None)
+    tm = getattr(p, "time_msc", None)
+    try:
+        if (t is None or int(t) <= 0) and tm is not None:
+            t = int(int(tm) // 1000)
+    except Exception:
+        pass
+    if t is None:
+        return 0.0
+    if isinstance(t, datetime):
+        return max(0.0, (datetime.now() - t).total_seconds())
+    try:
+        ti = int(t)
+        if ti <= 0:
+            return 0.0
+        return max(0.0, time.time() - float(ti))
+    except Exception:
+        return 0.0
+
+
+def _sl_price_to_lock_profit_usd(
+    symbol: str,
+    side: Signal,
+    entry_price: float,
+    lot: float,
+    lock_profit_usd: float,
+    *,
+    digits: int,
+) -> Optional[float]:
+    if entry_price <= 0 or lot <= 0 or lock_profit_usd <= 0:
+        return None
+    d = _price_distance_for_money(symbol, lot, float(lock_profit_usd), side)
+    if d is None or d <= 0:
+        return None
+    if side == "BUY":
+        return round(entry_price + d, int(digits))
+    return round(entry_price - d, int(digits))
+
+
+def _profit_usd_at_sl(
+    symbol: str,
+    side: Signal,
+    entry_price: float,
+    lot: float,
+    sl_price: float,
+    *,
+    digits: int,
+) -> Optional[float]:
+    _ = digits
+    info = mt5.symbol_info(symbol)
+    if info is None or entry_price <= 0 or lot <= 0 or sl_price <= 0:
+        return None
+    tick_value = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+    tick_size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+    if tick_value <= 0 or tick_size <= 0:
+        return None
+
+    if side == "BUY":
+        d = float(sl_price) - float(entry_price)
+    else:
+        d = float(entry_price) - float(sl_price)
+
+    if d <= 0:
+        return None
+
+    money = (d / tick_size) * tick_value * lot
+    return float(money)
+
+
+def _build_sl_tp(symbol: str, side: Signal, lot: float, sl_money: float, tp_money: float) -> Tuple[Optional[float], Optional[float]]:
+    tick = mt5.symbol_info_tick(symbol)
+    info = mt5.symbol_info(symbol)
+    if tick is None or info is None:
+        return None, None
+
+    price = float(tick.ask if side == "BUY" else tick.bid)
+
+    sl_dist = _price_distance_for_money(symbol, lot, abs(sl_money), side)
+    tp_dist = _price_distance_for_money(symbol, lot, abs(tp_money), side)
+
+    if sl_dist is None or tp_dist is None:
+        return None, None
+
+    if side == "BUY":
+        sl = price - sl_dist
+        tp = price + tp_dist
+    else:
+        sl = price + sl_dist
+        tp = price - tp_dist
+
+    digits = int(info.digits)
+    return round(sl, digits), round(tp, digits)
+
+
+def _build_sl_tp_points(symbol: str, side: Signal, sl_points: float, tp_points: float) -> Tuple[Optional[float], Optional[float]]:
+    tick = mt5.symbol_info_tick(symbol)
+    info = mt5.symbol_info(symbol)
+    if tick is None or info is None or not info.point:
+        return None, None
+
+    price = float(tick.ask if side == "BUY" else tick.bid)
+    point = float(info.point)
+
+    if sl_points <= 0 or tp_points <= 0:
+        return None, None
+
+    if side == "BUY":
+        sl = price - (sl_points * point)
+        tp = price + (tp_points * point)
+    else:
+        sl = price + (sl_points * point)
+        tp = price - (tp_points * point)
+
+    digits = int(info.digits)
+    return round(sl, digits), round(tp, digits)
+
+
+def _value_per_point_1lot(symbol: str) -> Optional[float]:
+    info = mt5.symbol_info(symbol)
+    if info is None or not info.point:
+        return None
+    tick_value = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+    tick_size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+    point = float(info.point)
+    if tick_value <= 0 or tick_size <= 0 or point <= 0:
+        return None
+    return tick_value * (point / tick_size)
+
+
+def calculate_lot_by_risk_points(symbol: str, risk_pct: float, sl_points: float, base_lot: float) -> float:
+    acc = mt5.account_info()
+    if acc is None:
+        return _clamp_volume(symbol, base_lot)
+    vpp = _value_per_point_1lot(symbol)
+    if vpp is None or sl_points <= 0:
+        return _clamp_volume(symbol, base_lot)
+
+    balance = float(getattr(acc, "balance", 0.0) or 0.0)
+    risk_amount = balance * (max(0.0, float(risk_pct)) / 100.0)
+    loss_1lot = float(sl_points) * float(vpp)
+    if loss_1lot <= 0 or risk_amount <= 0:
+        return _clamp_volume(symbol, base_lot)
+
+    lot = risk_amount / loss_1lot
+    return _clamp_volume(symbol, lot)
+
+
+def _position_magic_int(p) -> int:
+    try:
+        return int(getattr(p, "magic", -1) or -1)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _bot_trade_magics(cfg: Config) -> tuple[int, ...]:
+    magics: list[int] = [int(cfg.magic)]
+    if bool(getattr(cfg, "xauusd_parallel_enabled", False)):
+        magics.append(int(getattr(cfg, "xauusd_parallel_magic", 0) or 0))
+    return tuple(m for m in magics if m > 0)
+
+
+def _deal_magic_matches_bot(d, cfg: Config) -> bool:
+    return int(getattr(d, "magic", -1) or -1) in _bot_trade_magics(cfg)
+
+
+def _strategy_label_for_magic(cfg: Config, magic: int) -> str:
+    if bool(getattr(cfg, "xauusd_parallel_enabled", False)):
+        if int(magic) == int(getattr(cfg, "xauusd_parallel_magic", 0) or 0):
+            return "xauusd_parallel"
+    if int(magic) == int(cfg.magic):
+        return "main"
+    return f"magic_{magic}"
+
+
+def _xauusd_parallel_symbol(cfg: Config) -> str:
+    return str(getattr(cfg, "xauusd_parallel_symbol", "XAUUSD") or "XAUUSD").strip().upper()
+
+
+def _is_symbol_handled_by_xauusd_parallel(cfg: Config, symbol: str) -> bool:
+    if not bool(getattr(cfg, "xauusd_parallel_enabled", False)):
+        return False
+    return str(symbol or "").strip().upper() == _xauusd_parallel_symbol(cfg)
+
+
+def _xauusd_parallel_positions(cfg: Config) -> list:
+    sym = _xauusd_parallel_symbol(cfg)
+    magic = int(getattr(cfg, "xauusd_parallel_magic", 0) or 0)
+    pos = mt5.positions_get(symbol=sym)
+    if not pos:
+        return []
+    return [p for p in pos if _position_magic_int(p) == magic]
+
+
+def _position_is_managed_by_bot(p, cfg: Config) -> bool:
+    sym = getattr(p, "symbol", None)
+    if not sym or sym not in cfg.symbols:
+        return False
+    m = _position_magic_int(p)
+    if bool(getattr(cfg, "xauusd_parallel_enabled", False)):
+        par_sym = _xauusd_parallel_symbol(cfg)
+        par_magic = int(getattr(cfg, "xauusd_parallel_magic", 0) or 0)
+        if str(sym).upper() == par_sym and m == par_magic:
+            return False
+    if m == int(cfg.magic):
+        return True
+    if m == 0 and bool(getattr(cfg, "track_zero_magic_positions", True)):
+        return True
+    return False
+
+
+def _has_any_open_position_on_symbol(symbol: str) -> bool:
+    pos = mt5.positions_get(symbol=symbol)
+    if pos is None:
+        return False
+    return len(pos) > 0
+
+
+def _position_side(p) -> Signal | None:
+    t = int(getattr(p, "type", -1))
+    if t == int(getattr(mt5, "POSITION_TYPE_BUY", 0)):
+        return "BUY"
+    if t == int(getattr(mt5, "POSITION_TYPE_SELL", 1)):
+        return "SELL"
+    return None
+
+
+def _position_at_break_even(p, *, tolerance_points: float = 0.0) -> bool:
+    sl = float(getattr(p, "sl", 0.0) or 0.0)
+    if sl == 0.0:
+        return False
+    entry = float(getattr(p, "price_open", 0.0) or 0.0)
+    if entry == 0.0:
+        return False
+    side = _position_side(p)
+    sym = str(getattr(p, "symbol", "") or "")
+    info = mt5.symbol_info(sym) if sym else None
+    point = float(getattr(info, "point", 0.0) or 0.0) if info is not None else 0.0
+    tol = tolerance_points * point if point > 0 else 0.0
+    if side == "BUY":
+        return sl >= (entry - tol)
+    if side == "SELL":
+        return sl <= (entry + tol)
+    return False
+
+
+def _can_open_additional_position(
+    cfg: Config, symbol: str, side: Signal, p: dict
+) -> tuple[bool, str]:
+    pos = mt5.positions_get(symbol=symbol) or ()
+    n_open = len(pos)
+    max_per_symbol = max(1, int(p.get("max_positions_per_symbol", 1)))
+
+    if n_open == 0:
+        return True, ""
+
+    if max_per_symbol <= 1:
+        return False, f"already 1 position on symbol (max_per_symbol={max_per_symbol})"
+
+    if n_open >= max_per_symbol:
+        return False, f"reached max_positions_per_symbol ({n_open}/{max_per_symbol})"
+
+    sides = {_position_side(x) for x in pos if _position_side(x) is not None}
+    if sides and side not in sides:
+        return False, f"opposite-side position open ({sorted(s for s in sides if s)}); refusing to hedge"
+
+    if bool(p.get("pyramiding_require_be", True)):
+        not_be = [int(getattr(x, "ticket", 0)) for x in pos if not _position_at_break_even(x)]
+        if not_be:
+            return False, f"existing positions not at break-even yet (tickets={not_be})"
+
+    min_sep_pts = float(p.get("pyramiding_min_separation_points", 0.0) or 0.0)
+    if min_sep_pts > 0:
+        info = mt5.symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+        if info is None or tick is None:
+            return False, "missing tick/info for separation check"
+        point = float(getattr(info, "point", 0.0) or 0.0)
+        if point <= 0:
+            return False, "invalid point for separation check"
+        same_side = [x for x in pos if _position_side(x) == side]
+        if same_side:
+            ref_price = float(tick.ask if side == "BUY" else tick.bid)
+            entries = [float(getattr(x, "price_open", 0.0) or 0.0) for x in same_side]
+            if side == "BUY":
+                last_entry = min(entries)
+                dist_pts = (last_entry - ref_price) / point
+            else:
+                last_entry = max(entries)
+                dist_pts = (ref_price - last_entry) / point
+            if dist_pts < min_sep_pts:
+                return False, (
+                    f"too close to last same-side entry ({dist_pts:.0f} pts < {min_sep_pts:.0f} pts)"
+                )
+
+    return True, ""
+
+
+def _count_managed_open_positions(cfg: Config) -> int:
+    pos = mt5.positions_get()
+    if pos is None:
+        return 0
+    n = 0
+    for p in pos:
+        if _position_is_managed_by_bot(p, cfg):
+            n += 1
+    return n
+
+
+def total_open_positions() -> int:
+    pos = mt5.positions_get()
+    return len(pos) if pos else 0
+
+
+def _groups_for_symbol(cfg: Config, symbol: str) -> list[str]:
+    if not cfg.correlation_groups:
+        return []
+    out: list[str] = []
+    for gname, members in cfg.correlation_groups.items():
+        if symbol in members:
+            out.append(gname)
+    return out
+
+
+def _count_open_in_group(cfg: Config, group_name: str) -> int:
+    members = cfg.correlation_groups.get(group_name, ())
+    if not members:
+        return 0
+    pos = mt5.positions_get()
+    if pos is None:
+        return 0
+    memberset = set(members)
+    n = 0
+    for p in pos:
+        if getattr(p, "symbol", None) in memberset and _position_is_managed_by_bot(p, cfg):
+            n += 1
+    return n
+
+
+def _group_exposure(cfg: Config) -> dict[str, dict]:
+    if not cfg.correlation_groups:
+        return {}
+    cap = int(cfg.max_positions_per_group or 0)
+    out: dict[str, dict] = {}
+    for gname, members in cfg.correlation_groups.items():
+        n = _count_open_in_group(cfg, gname)
+        out[gname] = {
+            "members": list(members),
+            "cap": cap,
+            "open_count": n,
+            "blocked": (cap > 0 and n >= cap),
+        }
+    return out
+
+
+def _parse_correlation_groups(raw: Optional[str]) -> dict[str, tuple[str, ...]]:
+    if not raw or not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        logging.warning("BOT_CORRELATION_GROUPS: JSON inválido, ignorando. Valor=%r", raw)
+        return {}
+    if not isinstance(data, dict):
+        logging.warning("BOT_CORRELATION_GROUPS: se esperaba objeto {group: [symbols]}.")
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    for k, v in data.items():
+        if isinstance(v, list) and all(isinstance(x, str) for x in v):
+            out[str(k)] = tuple(str(x).strip() for x in v if str(x).strip())
+    return out
+
+
+def _startup_reconciliation(cfg: Config) -> dict[str, int]:
+    symset = set(cfg.symbols)
+    pos_all = mt5.positions_get()
+    rows: list[dict] = []
+    if pos_all:
+        for p in pos_all:
+            sym = getattr(p, "symbol", "")
+            if sym not in symset:
+                continue
+            rows.append(
+                {
+                    "ticket": int(getattr(p, "ticket", 0) or 0),
+                    "symbol": sym,
+                    "magic": _position_magic_int(p),
+                    "type": int(getattr(p, "type", -1) or -1),
+                    "volume": float(getattr(p, "volume", 0.0) or 0.0),
+                    "price_open": float(getattr(p, "price_open", 0.0) or 0.0),
+                    "sl": float(getattr(p, "sl", 0.0) or 0.0),
+                    "tp": float(getattr(p, "tp", 0.0) or 0.0),
+                    "profit": float(getattr(p, "profit", 0.0) or 0.0),
+                    "managed_by_bot": _position_is_managed_by_bot(p, cfg),
+                }
+            )
+
+    _log_event(
+        {
+            "event": "RECONCILE_POSITIONS",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "bot_magic": int(cfg.magic),
+            "track_zero_magic": bool(cfg.track_zero_magic_positions),
+            "count_on_symbols": len(rows),
+            "positions": rows,
+        }
+    )
+
+    n_managed_pos = sum(1 for r in rows if r.get("managed_by_bot"))
+
+    if rows:
+        logging.warning(
+            "Reconciliación: %d posición(es) abierta(s) en símbolos del bot. Ver evento RECONCILE_POSITIONS en trades.log.",
+            len(rows),
+        )
+
+    orders = mt5.orders_get()
+    pend: list[dict] = []
+    if orders:
+        for o in orders:
+            sym = getattr(o, "symbol", "")
+            if sym not in symset:
+                continue
+            try:
+                om = int(getattr(o, "magic", -1) or -1)
+            except (TypeError, ValueError):
+                om = -1
+            pend.append(
+                {
+                    "order": int(getattr(o, "ticket", 0) or 0),
+                    "symbol": sym,
+                    "magic": om,
+                    "type": int(getattr(o, "type", -1) or -1),
+                    "volume_initial": float(getattr(o, "volume_initial", 0.0) or 0.0),
+                    "price_open": float(getattr(o, "price_open", 0.0) or 0.0),
+                }
+            )
+
+    if pend:
+        _log_event(
+            {
+                "event": "RECONCILE_PENDING_ORDERS",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "count": len(pend),
+                "orders": pend,
+            }
+        )
+        logging.warning(
+            "Reconciliación: %d orden(es) pendiente(s) en símbolos del bot. Ver RECONCILE_PENDING_ORDERS.",
+            len(pend),
+        )
+
+    if bool(getattr(cfg, "cancel_orphan_pending_on_start", False)) and pend:
+        for o in pend:
+            if int(o.get("magic", -1)) != int(cfg.magic):
+                continue
+            oid = int(o.get("order", 0) or 0)
+            if oid <= 0:
+                continue
+            req = {"action": mt5.TRADE_ACTION_REMOVE, "order": oid}
+            res = mt5.order_send(req)
+            ok = res is not None and int(getattr(res, "retcode", -1)) == int(mt5.TRADE_RETCODE_DONE)
+            _log_event(
+                {
+                    "event": "CANCEL_PENDING_ON_START",
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "order": oid,
+                    "symbol": o.get("symbol"),
+                    "ok": ok,
+                    "retcode": int(getattr(res, "retcode", -1)) if res is not None else None,
+                    "comment": getattr(res, "comment", "") if res is not None else str(mt5.last_error()),
+                }
+            )
+            if ok:
+                logging.info("Cancelada orden pendiente huérfana: order=%s %s", oid, o.get("symbol"))
+            else:
+                logging.error(
+                    "No se pudo cancelar orden pendiente order=%s retcode=%s",
+                    oid,
+                    getattr(res, "retcode", None) if res is not None else mt5.last_error(),
+                )
+
+    return {
+        "positions_on_bot_symbols": len(rows),
+        "positions_managed": int(n_managed_pos),
+        "pending_orders": len(pend),
+        "positions": rows,
+    }
+
+
+def daily_loss_limit_reached(max_loss: float) -> tuple[bool, float]:
+    now = datetime.now()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    deals = mt5.history_deals_get(start, now + timedelta(seconds=1))
+    if deals is None:
+        return False, 0.0
+    pnl = 0.0
+    for d in deals:
+        pnl += float(getattr(d, "profit", 0.0) or 0.0)
+    return pnl <= max_loss, pnl
+
+
+def _compute_monthly_realized_pnl() -> float:
+    now = datetime.now()
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    deals = mt5.history_deals_get(start, now + timedelta(seconds=1))
+    if deals is None:
+        return 0.0
+    total = 0.0
+    for d in deals:
+        total += float(getattr(d, "profit", 0.0) or 0.0)
+        total += float(getattr(d, "swap", 0.0) or 0.0)
+        total += float(getattr(d, "commission", 0.0) or 0.0)
+    return total
+
+
+def _compute_open_risk_money() -> float:
+    positions = mt5.positions_get()
+    if not positions:
+        return 0.0
+    total_risk = 0.0
+    for p in positions:
+        sl = float(getattr(p, "sl", 0.0) or 0.0)
+        po = float(getattr(p, "price_open", 0.0) or 0.0)
+        vol = float(getattr(p, "volume", 0.0) or 0.0)
+        if sl <= 0.0 or po <= 0.0 or vol <= 0.0:
+            continue
+        sym = str(getattr(p, "symbol", "") or "")
+        info = mt5.symbol_info(sym)
+        if info is None:
+            continue
+        tick_value = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+        tick_size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+        if tick_size <= 0 or tick_value <= 0:
+            continue
+        if int(getattr(p, "type", -1)) == int(mt5.POSITION_TYPE_BUY):
+            dist_price = max(po - sl, 0.0)
+        else:
+            dist_price = max(sl - po, 0.0)
+        money = (dist_price / tick_size) * tick_value * vol
+        if money > 0:
+            total_risk += money
+    return total_risk
+
+
+_MONTHLY_LOSS_LIMIT_LOGGED_MONTH: str | None = None
+
+
+def monthly_loss_limit_reached(cfg: Config) -> tuple[bool, dict]:
+    if not bool(cfg.monthly_loss_limit_enabled):
+        return False, {"enabled": False}
+
+    acc = mt5.account_info()
+    if acc is None:
+        return False, {"enabled": True, "error": "no_account_info"}
+    balance_now = float(getattr(acc, "balance", 0.0) or 0.0)
+    if balance_now <= 0:
+        return False, {"enabled": True, "error": "non_positive_balance_now", "balance_now": round(balance_now, 2)}
+    realized = _compute_monthly_realized_pnl()
+    month_start_balance = balance_now - realized
+    if month_start_balance <= 0 or abs(month_start_balance) < 1e-6:
+        return False, {
+            "enabled": True,
+            "error": "non_positive_start_balance",
+            "month_start_balance": round(month_start_balance, 2),
+            "balance_now": round(balance_now, 2),
+            "realized_pnl": round(realized, 2),
+        }
+
+    pct = float(cfg.monthly_loss_limit_pct)
+    threshold_money = month_start_balance * (pct / 100.0)
+    realized_loss = max(-realized, 0.0)
+    open_risk = _compute_open_risk_money() if bool(cfg.monthly_loss_limit_include_open_risk) else 0.0
+    total_at_risk = realized_loss + open_risk
+    reached = total_at_risk >= threshold_money
+    return reached, {
+        "enabled": True,
+        "pct": pct,
+        "month_start_balance": round(month_start_balance, 2),
+        "realized_pnl": round(realized, 2),
+        "realized_loss": round(realized_loss, 2),
+        "open_risk": round(open_risk, 2),
+        "total_at_risk": round(total_at_risk, 2),
+        "threshold_money": round(threshold_money, 2),
+        "reached": bool(reached),
+        "include_open_risk": bool(cfg.monthly_loss_limit_include_open_risk),
+    }
+
+
+def _deal_reason_label_es(reason: int) -> str:
+    mapping = {
+        int(mt5.DEAL_REASON_CLIENT): "Manual / cliente",
+        int(mt5.DEAL_REASON_MOBILE): "App móvil",
+        int(mt5.DEAL_REASON_WEB): "Web",
+        int(mt5.DEAL_REASON_EXPERT): "Expert / bot",
+        int(mt5.DEAL_REASON_SL): "Stop loss",
+        int(mt5.DEAL_REASON_TP): "Take profit",
+        int(mt5.DEAL_REASON_SO): "Stop out",
+        int(mt5.DEAL_REASON_ROLLOVER): "Rollover",
+        int(mt5.DEAL_REASON_VMARGIN): "Margen",
+        int(mt5.DEAL_REASON_SPLIT): "Split",
+    }
+    return mapping.get(int(reason), f"Motivo código {reason}")
+
+
+def _telegram_seed_seen_close_deals(cfg: Config) -> None:
+    global _TELEGRAM_SEEN_OUT_DEAL_TICKETS, _TELEGRAM_CLOSE_TRACKER_SEEDED
+    if _TELEGRAM_CLOSE_TRACKER_SEEDED:
+        return
+    now = datetime.now()
+    start = now - timedelta(days=2)
+    deals = mt5.history_deals_get(start, now + timedelta(seconds=2))
+    if deals:
+        for d in deals:
+            if int(getattr(d, "magic", -1) or -1) != int(cfg.magic):
+                continue
+            if int(getattr(d, "entry", -1) or -1) != int(mt5.DEAL_ENTRY_OUT):
+                continue
+            t = int(getattr(d, "ticket", 0) or 0)
+            if t > 0:
+                _TELEGRAM_SEEN_OUT_DEAL_TICKETS.add(t)
+    _TELEGRAM_CLOSE_TRACKER_SEEDED = True
+
+
+def _telegram_notify_new_closes(cfg: Config) -> None:
+    if not telegram_notify.telegram_configured():
+        return
+    if not telegram_notify.env_bool("TELEGRAM_NOTIFY_TRADE_CLOSE", True):
+        return
+    _telegram_seed_seen_close_deals(cfg)
+
+    now = datetime.now()
+    try:
+        open_positions = mt5.positions_get(group="*") or []
+        oldest_open_sec = min(
+            (int(getattr(p, "time", 0) or 0) for p in open_positions if int(getattr(p, "time", 0) or 0) > 0),
+            default=0,
+        )
+        if oldest_open_sec > 0:
+            lookback = max(86400.0, time.time() - float(oldest_open_sec) + 3600.0)
+        else:
+            lookback = 86400.0
+    except Exception:
+        lookback = 86400.0
+    start = now - timedelta(seconds=lookback)
+    deals = mt5.history_deals_get(start, now + timedelta(seconds=2))
+    if not deals:
+        return
+
+    acc = mt5.account_info()
+    cur = str(getattr(acc, "currency", "") or "USD") if acc is not None else "USD"
+
+    for d in deals:
+        if int(getattr(d, "magic", -1) or -1) != int(cfg.magic):
+            continue
+        if int(getattr(d, "entry", -1) or -1) != int(mt5.DEAL_ENTRY_OUT):
+            continue
+        t = int(getattr(d, "ticket", 0) or 0)
+        if t <= 0 or t in _TELEGRAM_SEEN_OUT_DEAL_TICKETS:
+            continue
+        _TELEGRAM_SEEN_OUT_DEAL_TICKETS.add(t)
+
+        sym = str(getattr(d, "symbol", "") or "?")
+        profit = float(getattr(d, "profit", 0.0) or 0.0)
+        swap = float(getattr(d, "swap", 0.0) or 0.0)
+        comm = float(getattr(d, "commission", 0.0) or 0.0)
+        net = profit + swap + comm
+        vol = float(getattr(d, "volume", 0.0) or 0.0)
+        price = float(getattr(d, "price", 0.0) or 0.0)
+        reason = int(getattr(d, "reason", -1) or -1)
+        pos_id = int(getattr(d, "position_id", 0) or 0)
+        dtype = int(getattr(d, "type", -1) or -1)
+        if dtype == int(mt5.DEAL_TYPE_BUY):
+            deal_side_es = "compra"
+        elif dtype == int(mt5.DEAL_TYPE_SELL):
+            deal_side_es = "venta"
+        else:
+            deal_side_es = f"tipo_{dtype}"
+
+        outcome = "ganancia" if net > 1e-9 else "pérdida" if net < -1e-9 else "breakeven"
+        reason_txt = _deal_reason_label_es(reason)
+        sinfo = mt5.symbol_info(sym)
+        dig = int(sinfo.digits) if sinfo is not None else 5
+        px_txt = f"{price:.{dig}f}" if price else "—"
+
+        msg = (
+            f"meta-trader: posición cerrada\n"
+            f"{sym} · deal de cierre: {deal_side_es} · vol {vol:.2f}\n"
+            f"Motivo: {reason_txt}\n"
+            f"Precio: {px_txt}\n"
+            f"PnL (profit+swap+comisión): {net:+.2f} {cur} → {outcome}"
+        )
+        if pos_id:
+            msg += f"\nPosition ID: {pos_id}"
+        try:
+            telegram_notify.notify(msg, dedup_key=None)
+        except Exception:
+            logging.exception("Telegram notify (close) failed (non-fatal).")
+
+
+def _scan_logs_for_logged_close_deal_tickets(days: int) -> set[int]:
+    seen: set[int] = set()
+    cutoff = datetime.now() - timedelta(days=max(1, int(days)))
+    candidates: list[Path] = []
+    main_log = Path(_TRADES_LOG_FILENAME)
+    if main_log.exists():
+        candidates.append(main_log)
+    logs_dir = Path("logs")
+    if logs_dir.is_dir():
+        try:
+            rotated = sorted(
+                logs_dir.glob("trades_*.log"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except Exception:
+            rotated = []
+        for p in rotated:
+            try:
+                if datetime.fromtimestamp(p.stat().st_mtime) < cutoff:
+                    break
+            except Exception:
+                continue
+            candidates.append(p)
+
+    for path in candidates:
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if '"TRADE_CLOSE"' not in line:
+                        continue
+                    idx = line.find("{")
+                    if idx < 0:
+                        continue
+                    payload = line[idx:].strip()
+                    try:
+                        obj = json.loads(payload)
+                    except Exception:
+                        continue
+                    if obj.get("event") != "TRADE_CLOSE":
+                        continue
+                    dt = obj.get("deal_ticket")
+                    try:
+                        dt_int = int(dt) if dt is not None else 0
+                    except (TypeError, ValueError):
+                        dt_int = 0
+                    if dt_int > 0:
+                        seen.add(dt_int)
+        except Exception:
+            logging.debug("Error scanning %s for TRADE_CLOSE history (non-fatal).", path, exc_info=True)
+    return seen
+
+
+def _seed_close_log_tracker(cfg: Config) -> None:
+    global _CLOSE_LOG_SEEN_DEAL_TICKETS, _CLOSE_LOG_TRACKER_SEEDED
+    if _CLOSE_LOG_TRACKER_SEEDED:
+        return
+    _ = cfg
+    seen = _scan_logs_for_logged_close_deal_tickets(_CLOSE_LOG_BACKFILL_DAYS)
+    _CLOSE_LOG_SEEN_DEAL_TICKETS.update(seen)
+    _CLOSE_LOG_TRACKER_SEEDED = True
+    logging.info(
+        "TRADE_CLOSE tracker seeded from logs: %d prior deal tickets found (lookback=%dd).",
+        len(seen), _CLOSE_LOG_BACKFILL_DAYS,
+    )
+
+
+def _first_in_deal_for_position_from_broker(pos_id: int, *, end: datetime) -> Any | None:
+    if pos_id <= 0:
+        return None
+    end_adj = end + timedelta(seconds=2)
+    dl: Any | None = None
+    try:
+        dl = mt5.history_deals_get(datetime(2000, 1, 1), end_adj, position=int(pos_id))
+    except TypeError:
+        dl = None
+    if dl:
+        ins = [x for x in dl if int(getattr(x, "entry", -1) or -1) == int(mt5.DEAL_ENTRY_IN)]
+        if ins:
+            return min(ins, key=lambda x: int(getattr(x, "time", 0) or 0))
+    start_scan = end - timedelta(days=730)
+    dl2 = mt5.history_deals_get(start_scan, end_adj)
+    if not dl2:
+        return None
+    ins2 = [
+        x
+        for x in dl2
+        if int(getattr(x, "position_id", 0) or 0) == int(pos_id)
+        and int(getattr(x, "entry", -1) or -1) == int(mt5.DEAL_ENTRY_IN)
+    ]
+    if not ins2:
+        return None
+    return min(ins2, key=lambda x: int(getattr(x, "time", 0) or 0))
+
+
+def _position_id_from_deal_ticket(deal_ticket: object) -> Optional[int]:
+    if deal_ticket is None:
+        return None
+    try:
+        tid = int(deal_ticket)
+    except (TypeError, ValueError):
+        return None
+    if tid <= 0:
+        return None
+    end = datetime.now() + timedelta(seconds=2)
+    try:
+        dh = mt5.history_deals_get(datetime(2000, 1, 1), end, ticket=tid)
+    except TypeError:
+        dh = None
+    if not dh:
+        return None
+    pid = int(getattr(dh[0], "position_id", 0) or 0)
+    return pid if pid > 0 else None
+
+
+def _trade_open_fields_from_trades_logs(
+    position_id: int, *, lookback_days: int
+) -> tuple[Optional[float], Optional[str], Optional[float]]:
+    if position_id <= 0:
+        return None, None, None
+    days = max(1, int(lookback_days))
+    cutoff = datetime.now() - timedelta(days=days)
+    candidates: list[Path] = []
+    main_log = Path(_TRADES_LOG_FILENAME)
+    if main_log.exists():
+        candidates.append(main_log)
+    logs_dir = Path("logs")
+    if logs_dir.is_dir():
+        try:
+            rotated = sorted(logs_dir.glob("trades_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        except Exception:
+            rotated = []
+        for p in rotated:
+            try:
+                if datetime.fromtimestamp(p.stat().st_mtime) < cutoff:
+                    break
+            except Exception:
+                continue
+            candidates.append(p)
+
+    rows: list[tuple[datetime, float, str, float]] = []
+    for path in candidates:
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if '"TRADE_OPEN"' not in line:
+                        continue
+                    idx = line.find("{")
+                    if idx < 0:
+                        continue
+                    payload = line[idx:].strip()
+                    try:
+                        obj = json.loads(payload)
+                    except Exception:
+                        continue
+                    if obj.get("event") != "TRADE_OPEN":
+                        continue
+                    opid = obj.get("position_id")
+                    try:
+                        opi = int(opid) if opid is not None else 0
+                    except (TypeError, ValueError):
+                        opi = 0
+                    if opi != int(position_id):
+                        continue
+                    ts_s = obj.get("ts") or obj.get("opened_at")
+                    if not ts_s:
+                        continue
+                    try:
+                        tdt = datetime.fromisoformat(str(ts_s))
+                    except Exception:
+                        continue
+                    px = obj.get("price_open")
+                    if px is None:
+                        px = obj.get("price")
+                    if px is None:
+                        continue
+                    try:
+                        pxf = float(px)
+                    except (TypeError, ValueError):
+                        continue
+                    lotv = float(obj.get("lot", 0.0) or 0.0)
+                    rows.append((tdt, pxf, str(ts_s), lotv))
+        except Exception:
+            logging.debug("Error scanning %s for TRADE_OPEN by position_id (non-fatal).", path, exc_info=True)
+
+    if not rows:
+        return None, None, None
+    rows.sort(key=lambda x: x[0])
+    _, price_open, opened_at, lot = rows[0]
+    return price_open, opened_at, (lot if lot > 0 else None)
+
+
+def _log_new_closes(cfg: Config) -> None:
+    global _CLOSE_LOG_BACKFILL_DONE
+    _seed_close_log_tracker(cfg)
+
+    now = datetime.now()
+    end = now + timedelta(seconds=2)
+    if not _CLOSE_LOG_BACKFILL_DONE:
+        lookback = float(_CLOSE_LOG_BACKFILL_DAYS) * 86400.0
+    else:
+        try:
+            open_positions = mt5.positions_get(group="*") or []
+            oldest_open_sec = min(
+                (int(getattr(p, "time", 0) or 0) for p in open_positions if int(getattr(p, "time", 0) or 0) > 0),
+                default=0,
+            )
+            if oldest_open_sec > 0:
+                lookback = max(86400.0, time.time() - float(oldest_open_sec) + 3600.0)
+            else:
+                lookback = 86400.0
+        except Exception:
+            lookback = 86400.0
+    start_close = now - timedelta(seconds=lookback)
+    deals = mt5.history_deals_get(start_close, end)
+    if not deals:
+        _CLOSE_LOG_BACKFILL_DONE = True
+        return
+
+    index_days = max(int(_CLOSE_LOG_BACKFILL_DAYS), 365)
+    start_index = now - timedelta(days=index_days)
+    deals_index = mt5.history_deals_get(start_index, end)
+    by_pos: dict[int, list] = {}
+    if deals_index:
+        for d in deals_index:
+            if int(getattr(d, "magic", -1) or -1) != int(cfg.magic):
+                continue
+            pid = int(getattr(d, "position_id", 0) or 0)
+            if pid <= 0:
+                continue
+            by_pos.setdefault(pid, []).append(d)
+
+    for d in deals:
+        if int(getattr(d, "magic", -1) or -1) != int(cfg.magic):
+            continue
+        if int(getattr(d, "entry", -1) or -1) != int(mt5.DEAL_ENTRY_OUT):
+            continue
+        t = int(getattr(d, "ticket", 0) or 0)
+        if t <= 0 or t in _CLOSE_LOG_SEEN_DEAL_TICKETS:
+            continue
+        _CLOSE_LOG_SEEN_DEAL_TICKETS.add(t)
+
+        sym = str(getattr(d, "symbol", "") or "?")
+        profit = float(getattr(d, "profit", 0.0) or 0.0)
+        swap = float(getattr(d, "swap", 0.0) or 0.0)
+        comm = float(getattr(d, "commission", 0.0) or 0.0)
+        net = profit + swap + comm
+        vol_out = float(getattr(d, "volume", 0.0) or 0.0)
+        price_close = float(getattr(d, "price", 0.0) or 0.0)
+        reason = int(getattr(d, "reason", -1) or -1)
+        pos_id = int(getattr(d, "position_id", 0) or 0)
+        dtype = int(getattr(d, "type", -1) or -1)
+        if dtype == int(mt5.DEAL_TYPE_BUY):
+            position_side: Signal = "SELL"
+        elif dtype == int(mt5.DEAL_TYPE_SELL):
+            position_side = "BUY"
+        else:
+            position_side = "SELL"
+
+        time_close = int(getattr(d, "time", 0) or 0)
+        closed_at = datetime.fromtimestamp(time_close).isoformat(timespec="seconds") if time_close > 0 else None
+        is_backfill = bool(time_close > 0 and (now.timestamp() - time_close) > 300.0)
+
+        price_open: float | None = None
+        opened_at: str | None = None
+        volume_in: float | None = None
+        if pos_id and pos_id in by_pos:
+            in_deals = [x for x in by_pos[pos_id] if int(getattr(x, "entry", -1) or -1) == int(mt5.DEAL_ENTRY_IN)]
+            if in_deals:
+                first_in = min(in_deals, key=lambda x: int(getattr(x, "time", 0) or 0))
+                price_open = float(getattr(first_in, "price", 0.0) or 0.0) or None
+                t_in = int(getattr(first_in, "time", 0) or 0)
+                if t_in > 0:
+                    opened_at = datetime.fromtimestamp(t_in).isoformat(timespec="seconds")
+                volume_in = float(getattr(first_in, "volume", 0.0) or 0.0) or None
+
+        if (price_open is None or opened_at is None) and pos_id > 0:
+            fin = _first_in_deal_for_position_from_broker(pos_id, end=now)
+            if fin is not None:
+                price_open = float(getattr(fin, "price", 0.0) or 0.0) or None
+                t_in2 = int(getattr(fin, "time", 0) or 0)
+                if t_in2 > 0:
+                    opened_at = datetime.fromtimestamp(t_in2).isoformat(timespec="seconds")
+                volume_in = float(getattr(fin, "volume", 0.0) or 0.0) or None
+
+        if (price_open is None or opened_at is None) and pos_id > 0:
+            lp, lo, lv = _trade_open_fields_from_trades_logs(pos_id, lookback_days=max(int(_CLOSE_LOG_BACKFILL_DAYS), 365))
+            if price_open is None and lp is not None:
+                price_open = lp
+            if opened_at is None and lo is not None:
+                opened_at = lo
+            if volume_in is None and lv is not None:
+                volume_in = lv
+
+        duration_seconds: int | None = None
+        if opened_at and closed_at:
+            try:
+                duration_seconds = int(
+                    (datetime.fromisoformat(closed_at) - datetime.fromisoformat(opened_at)).total_seconds()
+                )
+            except Exception:
+                duration_seconds = None
+
+        grades = _compute_trade_grades(
+            symbol=sym,
+            side=position_side,
+            price_open=price_open,
+            price_close=(price_close or None),
+            opened_at_iso=opened_at,
+            closed_at_iso=closed_at,
+        )
+
+        _log_event(
+            {
+                "event": "TRADE_CLOSE",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "symbol": sym,
+                "side": position_side,
+                "position_id": pos_id or None,
+                "deal_ticket": t,
+                "volume": vol_out,
+                "volume_in": volume_in,
+                "price_open": price_open,
+                "price_close": price_close or None,
+                "profit": profit,
+                "swap": swap,
+                "commission": comm,
+                "net": net,
+                "reason_code": reason,
+                "reason_label": _deal_reason_label_es(reason),
+                "opened_at": opened_at,
+                "closed_at": closed_at,
+                "duration_seconds": duration_seconds,
+                "backfilled": is_backfill,
+                "entry_grade": grades.get("entry_grade"),
+                "exit_grade": grades.get("exit_grade"),
+                "trade_grade": grades.get("trade_grade"),
+            }
+        )
+
+    _CLOSE_LOG_BACKFILL_DONE = True
+
+
+def _open_sl_at_entry_retry_retcodes() -> frozenset[int]:
+    return frozenset(
+        c
+        for c in (
+            int(getattr(mt5, "TRADE_RETCODE_INVALID_STOPS", 10016)),
+            int(getattr(mt5, "TRADE_RETCODE_INVALID_PRICE", 10015)),
+            int(getattr(mt5, "TRADE_RETCODE_OFF_QUOTES", 10014)),
+            int(getattr(mt5, "TRADE_RETCODE_REQUOTE", 10004)),
+        )
+        if c > 0
+    )
+
+
+def _order_send_deal_try_fillings(symbol: str, request: dict, filling_candidates: list) -> Any:
+    result: Any = None
+    for fill in filling_candidates:
+        request["type_filling"] = fill
+        try:
+            result = mt5.order_send(request)
+        except Exception:
+            logging.exception("[%s] order_send raised exception (type_filling=%s).", symbol, fill)
+            return None
+        if result is None:
+            logging.error("[%s] order_send returned None (type_filling=%s). last_error=%s", symbol, fill, mt5.last_error())
+            return None
+        if int(getattr(result, "retcode", -1)) == 10030:
+            logging.warning("[%s] Unsupported filling mode with type_filling=%s (retcode=10030). Retrying...", symbol, fill)
+            continue
+        break
+    return result
+
+
+def open_trade(cfg: Config, symbol: str, side: Signal) -> bool:
+    if side not in ("BUY", "SELL"):
+        return False
+
+    if not _ensure_symbol(symbol):
+        return False
+
+    p = _effective_params(cfg, symbol)
+
+    allowed, reason = _can_open_additional_position(cfg, symbol, side, p)
+    if not allowed:
+        logging.info("[%s] Skipping new entry: %s.", symbol, reason)
+        return False
+
+    open_total = _count_managed_open_positions(cfg)
+    if open_total >= cfg.max_open_trades:
+        logging.info("[%s] Max open trades reached (%d/%d). Skipping.", symbol, open_total, cfg.max_open_trades)
+        return False
+
+    group_cap = int(cfg.max_positions_per_group or 0)
+    if group_cap > 0 and cfg.correlation_groups:
+        groups = _groups_for_symbol(cfg, symbol)
+        for gname in groups:
+            n_in_group = _count_open_in_group(cfg, gname)
+            if n_in_group >= group_cap:
+                logging.info(
+                    "[%s] Correlation cap: group %r has %d/%d open positions. Skipping.",
+                    symbol, gname, n_in_group, group_cap,
+                )
+                _log_event(
+                    {
+                        "event": "CORRELATION_SKIP",
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "symbol": symbol,
+                        "side": side,
+                        "group": gname,
+                        "members": list(cfg.correlation_groups.get(gname, ())),
+                        "open_in_group": n_in_group,
+                        "cap": group_cap,
+                    }
+                )
+                return False
+
+    cap_h = int(p.get("max_trades_per_hour_per_symbol", 0) or 0)
+    if cap_h > 0:
+        now_h = datetime.now()
+        n_h = _count_opens_in_window(symbol, now_h, 3600.0)
+        if n_h >= cap_h:
+            logging.info(
+                "[%s] Hourly rate limit: %d opens in last 60m (cap=%d). Skipping.",
+                symbol,
+                n_h,
+                cap_h,
+            )
+            _log_event(
+                {
+                    "event": "RATE_LIMIT_SKIP",
+                    "ts": now_h.isoformat(timespec="seconds"),
+                    "symbol": symbol,
+                    "side": side,
+                    "opens_last_60m": n_h,
+                    "cap": cap_h,
+                }
+            )
+            return False
+
+    if bool(p.get("anti_chase_enabled", False)):
+        atr_period = int(p.get("anti_chase_atr_period", 20) or 20)
+        atr_mult = float(p.get("anti_chase_atr_mult", 2.0) or 2.0)
+        bar_range = get_last_m15_bar_range(symbol)
+        atr_val = get_atr(symbol, mt5.TIMEFRAME_M15, atr_period)
+        if bar_range is not None and atr_val is not None and atr_val > 0:
+            threshold = atr_val * atr_mult
+            if bar_range > threshold:
+                ratio = bar_range / atr_val
+                logging.info(
+                    "[%s] Anti-chase: signal bar range %.5f > %.2fx ATR(%d) %.5f (ratio=%.2f). Skipping.",
+                    symbol, bar_range, atr_mult, atr_period, atr_val, ratio,
+                )
+                _log_event(
+                    {
+                        "event": "BAR_EXHAUSTION_SKIP",
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "symbol": symbol,
+                        "side": side,
+                        "bar_range": round(bar_range, 6),
+                        "atr": round(atr_val, 6),
+                        "atr_period": atr_period,
+                        "atr_mult": atr_mult,
+                        "ratio": round(ratio, 3),
+                    }
+                )
+                return False
+    sl_money = float(p["sl_money"])
+    tp_money = float(p["tp_money"])
+    sl_points = float(p["sl_points"])
+    tp_points = float(p["tp_points"])
+    max_spread_points = float(p["max_spread_points"])
+
+    ok_spread, spread, avg_spread = _is_spread_ok(cfg, symbol, max_spread_points=max_spread_points)
+    if not ok_spread:
+        if spread is None:
+            logging.warning("[%s] Could not read spread. Skipping.", symbol)
+        else:
+            if cfg.spread_dynamic_enabled and avg_spread is not None:
+                logging.info(
+                    "[%s] Spread not OK (now=%.1f pts, avg=%.1f pts, mult=%.2f, hard_max=%.1f). Skipping.",
+                    symbol,
+                    spread,
+                    avg_spread,
+                    cfg.spread_dynamic_mult,
+                    max_spread_points,
+                )
+            else:
+                logging.info("[%s] Spread too high (%.1f pts > %.1f pts). Skipping.", symbol, spread, max_spread_points)
+        return False
+
+    tick = mt5.symbol_info_tick(symbol)
+    info = mt5.symbol_info(symbol)
+    if tick is None or info is None:
+        logging.error("[%s] Missing tick/info.", symbol)
+        return False
+
+    term = mt5.terminal_info()
+    if term is not None and hasattr(term, "trade_allowed") and not bool(getattr(term, "trade_allowed", True)):
+        logging.error("[%s] Terminal trade not allowed (enable Algo Trading in MT5). Skipping.", symbol)
+        return False
+    if hasattr(info, "trade_mode") and int(getattr(info, "trade_mode") or 0) == int(getattr(mt5, "SYMBOL_TRADE_MODE_DISABLED", -1)):
+        logging.error("[%s] Symbol trade mode disabled by broker. Skipping.", symbol)
+        return False
+
+    risk_pct_base = float(p["risk_per_trade_pct"])
+    port_w = _portfolio_weight_for(cfg, symbol)
+    risk_pct_eff = risk_pct_base * max(0.0, port_w) if bool(cfg.portfolio_enabled) else risk_pct_base
+
+    sl_tp_mode = "fixed"
+    atr_at_entry: Optional[float] = None
+    if bool(p.get("sl_tp_atr_enabled", False)):
+        tf_str = str(p.get("sl_tp_atr_timeframe", "M15"))
+        tf = _mt5_timeframe(tf_str)
+        atr_period = int(p.get("sl_tp_atr_period", 14) or 14)
+        sl_mult = float(p.get("sl_atr_mult", 2.0) or 2.0)
+        tp_mult = float(p.get("tp_atr_mult", 4.0) or 4.0)
+        min_pts = float(p.get("sl_tp_atr_min_points", 0.0) or 0.0)
+        atr_val = get_atr(symbol, tf, atr_period)
+        point = float(getattr(info, "point", 0.0) or 0.0)
+        if atr_val is not None and atr_val > 0 and point > 0 and sl_mult > 0 and tp_mult > 0:
+            new_sl_pts = (atr_val * sl_mult) / point
+            new_tp_pts = (atr_val * tp_mult) / point
+            if min_pts > 0 and new_sl_pts < min_pts:
+                scale = min_pts / new_sl_pts
+                new_sl_pts = min_pts
+                new_tp_pts = new_tp_pts * scale
+            sl_points = float(new_sl_pts)
+            tp_points = float(new_tp_pts)
+            atr_at_entry = float(atr_val)
+            sl_tp_mode = f"atr({tf_str.upper()},p={atr_period},sl*{sl_mult:g},tp*{tp_mult:g})"
+            logging.info(
+                "[%s] SL/TP from ATR(%s,%d)=%.5f → sl_pts=%.0f, tp_pts=%.0f (mult sl=%.2f tp=%.2f).",
+                symbol, tf_str.upper(), atr_period, atr_val, sl_points, tp_points, sl_mult, tp_mult,
+            )
+        else:
+            logging.warning(
+                "[%s] ATR SL/TP enabled but ATR invalid (atr=%s, point=%s). Fallback to fixed sl=%.0f tp=%.0f.",
+                symbol, atr_val, point, sl_points, tp_points,
+            )
+
+    lot = cfg.lot
+    if bool(p["use_risk_sizing"]):
+        if sl_points > 0:
+            lot = calculate_lot_by_risk_points(symbol, float(risk_pct_eff), sl_points, cfg.lot)
+        else:
+            lot = calculate_lot_by_risk(symbol, float(risk_pct_eff), sl_money, cfg.lot)
+
+    if bool(cfg.regime_lot_sizing_enabled):
+        lab = str(_LAST_REGIME_BY_SYMBOL.get(symbol, "") or "UNCERTAIN").strip().upper()
+        mult = float(cfg.regime_lot_multiplier_by_label.get(lab, 1.0))
+        if mult > 0 and abs(mult - 1.0) > 1e-9:
+            lot = _clamp_volume(symbol, float(lot) * mult)
+            logging.info("[%s] Regime lot mult label=%s x%.4f → lot=%.4f", symbol, lab, mult, lot)
+
+    ml_cap_sym = float(p.get("max_lot_per_trade", 0.0) or 0.0)
+    ml_cap_cfg = float(getattr(cfg, "max_lot_per_trade", 0.0) or 0.0)
+    ml_cap = ml_cap_sym if ml_cap_sym > 0 else ml_cap_cfg
+    if ml_cap > 0:
+        clipped = min(float(lot), ml_cap)
+        if clipped + 1e-9 < float(lot):
+            logging.info("[%s] max_lot_per_trade cap %.4f → %.4f", symbol, lot, clipped)
+            lot = _clamp_volume(symbol, clipped)
+
+    order_type = mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL
+    price = float(tick.ask if side == "BUY" else tick.bid)
+
+    if sl_points > 0 and tp_points > 0:
+        sl, tp = _build_sl_tp_points(symbol, side, sl_points, tp_points)
+    else:
+        sl, tp = _build_sl_tp(symbol, side, lot, sl_money, tp_money)
+
+    ladder_on = bool(cfg.usd_sl_ladder_enabled)
+    ladder_init = float(p.get("usd_sl_ladder_initial_sl_money", cfg.usd_sl_ladder_initial_sl_money) or 0.8)
+    if ladder_on:
+        sl_usd = _sl_price_for_max_loss_usd(symbol, side, price, lot, ladder_init, digits=int(info.digits))
+        if sl_usd is not None:
+            sl = sl_usd
+        tp = None
+
+    account = mt5.account_info()
+    balance = float(account.balance) if account else 0.0
+    risk_efectivo_pct = (ladder_init / balance * 100) if balance > 0 else 0.0
+    logging.info(
+        "[%s] Sizing: lot=%.4f | sl_atr_pts=%.0f | ladder_initial_sl=$%.2f | risk_efectivo_pct=%.2f%%",
+        symbol,
+        lot,
+        sl_points,
+        ladder_init,
+        risk_efectivo_pct,
+    )
+
+    tp_target = tp
+    digits = int(info.digits)
+    point = float(getattr(info, "point", 0.0) or 0.0)
+    open_sl_active = bool(p.get("open_sl_at_entry", False)) and sl is not None and (not ladder_on)
+
+    filling_candidates = [
+        mt5.ORDER_FILLING_IOC,
+        mt5.ORDER_FILLING_FOK,
+        getattr(mt5, "ORDER_FILLING_RETURN", mt5.ORDER_FILLING_IOC),
+    ]
+
+    result: Any = None
+    open_sl_extra_used: Optional[int] = None
+    execution_price = float(price)
+
+    if open_sl_active:
+        if point <= 0:
+            logging.error("[%s] open_sl_at_entry: symbol point is zero.", symbol)
+            return False
+        max_extra = max(
+            0,
+            int(
+                p.get(
+                    "open_sl_at_entry_max_extra_points",
+                    getattr(cfg, "open_sl_at_entry_max_extra_points", 400),
+                )
+            ),
+        )
+        min_cfg = max(
+            0,
+            int(
+                float(
+                    p.get(
+                        "open_sl_at_entry_min_extra_points",
+                        getattr(cfg, "open_sl_at_entry_min_extra_points", 0),
+                    )
+                )
+            ),
+        )
+        extra_broker = _broker_min_stop_extra_points(symbol)
+        extra_start = max(min_cfg, extra_broker, 0)
+        if extra_start > max_extra:
+            logging.error(
+                "[%s] open_sl_at_entry: min extra points %d (cfg=%d broker>=%d) > max %d. Skipping.",
+                symbol,
+                extra_start,
+                min_cfg,
+                extra_broker,
+                max_extra,
+            )
+            return False
+        retry_codes = _open_sl_at_entry_retry_retcodes()
+        last_res: Any = None
+        for idx, extra in enumerate(range(extra_start, max_extra + 1)):
+            tick2 = mt5.symbol_info_tick(symbol)
+            if tick2 is None:
+                logging.error("[%s] open_sl_at_entry: no tick.", symbol)
+                return False
+            execution_price = float(tick2.ask if side == "BUY" else tick2.bid)
+            if side == "BUY":
+                sl_try = round(execution_price - extra * point, digits)
+            else:
+                sl_try = round(execution_price + extra * point, digits)
+            tp_try = tp_target
+            if tp_try is not None:
+                if side == "BUY" and float(tp_try) <= sl_try:
+                    tp_try = None
+                elif side == "SELL" and float(tp_try) >= sl_try:
+                    tp_try = None
+            request: dict = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": lot,
+                "type": order_type,
+                "price": execution_price,
+                "deviation": cfg.deviation_points,
+                "magic": cfg.magic,
+                "comment": "meta-trader-bot",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "sl": sl_try,
+            }
+            if tp_try is not None:
+                request["tp"] = tp_try
+
+            if idx == 0:
+                logging.info(
+                    "[%s] Opening %s | lot=%.2f | price=%.*f | spread=%.1f pts | open_sl_at_entry try extra=%d (start=%d) → SL=%.*f TP=%s",
+                    symbol,
+                    side,
+                    lot,
+                    digits,
+                    execution_price,
+                    spread if spread is not None else 0.0,
+                    extra,
+                    extra_start,
+                    digits,
+                    sl_try,
+                    f"{tp_try:.{digits}f}" if tp_try is not None else "None",
+                )
+            last_res = _order_send_deal_try_fillings(symbol, request, filling_candidates)
+            if last_res is None:
+                _record_failed_order_attempt(symbol, cfg, None)
+                return False
+            rc = int(getattr(last_res, "retcode", -1))
+            if rc == int(mt5.TRADE_RETCODE_DONE):
+                sl, tp = sl_try, tp_try
+                open_sl_extra_used = extra
+                result = last_res
+                if extra > 0:
+                    logging.info(
+                        "[%s] open_sl_at_entry: broker accepted SL with extra_points=%d SL=%.*f (price=%.*f)",
+                        symbol,
+                        extra,
+                        digits,
+                        sl_try,
+                        digits,
+                        execution_price,
+                    )
+                break
+            if rc not in retry_codes:
+                logging.error(
+                    "[%s] open_sl_at_entry: order failed (not retryable). retcode=%s | comment=%s | extra=%d",
+                    symbol,
+                    rc,
+                    getattr(last_res, "comment", ""),
+                    extra,
+                )
+                _record_failed_order_attempt(symbol, cfg, last_res)
+                return False
+            logging.warning(
+                "[%s] open_sl_at_entry: retcode=%s extra_points=%d comment=%r → trying larger SL distance…",
+                symbol,
+                rc,
+                extra,
+                getattr(last_res, "comment", ""),
+            )
+        else:
+            logging.error(
+                "[%s] open_sl_at_entry: exhausted SL offsets 0..%d (last retcode=%s comment=%r).",
+                symbol,
+                max_extra,
+                getattr(last_res, "retcode", "n/a") if last_res else "n/a",
+                getattr(last_res, "comment", "") if last_res else "",
+            )
+            _record_failed_order_attempt(symbol, cfg, last_res)
+            return False
+    else:
+        request: dict = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": lot,
+            "type": order_type,
+            "price": price,
+            "deviation": cfg.deviation_points,
+            "magic": cfg.magic,
+            "comment": "meta-trader-bot",
+            "type_time": mt5.ORDER_TIME_GTC,
+        }
+
+        if sl is not None:
+            request["sl"] = sl
+        if tp is not None:
+            request["tp"] = tp
+
+        logging.info(
+            "[%s] Opening %s | lot=%.2f | price=%.*f | spread=%.1f pts | SL=%s | TP=%s",
+            symbol,
+            side,
+            lot,
+            digits,
+            price,
+            spread,
+            f"{sl:.{digits}f}" if sl is not None else "None",
+            f"{tp:.{digits}f}" if tp is not None else "None",
+        )
+
+        result = _order_send_deal_try_fillings(symbol, request, filling_candidates)
+        if result is None:
+            logging.error("[%s] order_send returned None. last_error=%s", symbol, mt5.last_error())
+            _record_failed_order_attempt(symbol, cfg, None)
+            return False
+
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            logging.error(
+                "[%s] Order failed. retcode=%s | comment=%s | request_id=%s",
+                symbol,
+                result.retcode,
+                getattr(result, "comment", ""),
+                getattr(result, "request_id", ""),
+            )
+            _record_failed_order_attempt(symbol, cfg, result)
+            return False
+
+    logging.info("[%s] Order placed OK. deal=%s order=%s", symbol, getattr(result, "deal", None), getattr(result, "order", None))
+    _last_failed_order_attempt.pop(symbol, None)
+    _last_trade_time[symbol] = datetime.now()
+    _record_symbol_open_timestamp(symbol)
+    pos_id_for_log = _position_id_from_deal_ticket(getattr(result, "deal", None))
+    open_ts_iso = datetime.now().isoformat(timespec="seconds")
+    _log_event(
+        {
+            "event": "TRADE_OPEN",
+            "ts": open_ts_iso,
+            "opened_at": open_ts_iso,
+            "symbol": symbol,
+            "side": side,
+            "lot": lot,
+            "price": execution_price,
+            "price_open": execution_price,
+            "spread_points": float(spread) if spread is not None else None,
+            "sl": sl,
+            "tp": tp,
+            "sl_money": sl_money,
+            "tp_money": tp_money,
+            "sl_points": sl_points if sl_points > 0 else None,
+            "tp_points": tp_points if tp_points > 0 else None,
+            "sl_tp_mode": sl_tp_mode,
+            "open_sl_at_entry": bool(p.get("open_sl_at_entry", False)),
+            "open_sl_at_entry_extra_points": open_sl_extra_used,
+            "atr_at_entry": round(atr_at_entry, 6) if atr_at_entry is not None else None,
+            "portfolio_enabled": bool(cfg.portfolio_enabled),
+            "portfolio_weight": round(port_w, 6) if bool(cfg.portfolio_enabled) else None,
+            "risk_per_trade_pct_base": risk_pct_base,
+            "risk_per_trade_pct_effective": round(risk_pct_eff, 6),
+            "magic": cfg.magic,
+            "retcode": int(getattr(result, "retcode", -1)),
+            "order": getattr(result, "order", None),
+            "deal": getattr(result, "deal", None),
+            "position_id": pos_id_for_log,
+        }
+    )
+
+    if telegram_notify.telegram_configured() and telegram_notify.env_bool("TELEGRAM_NOTIFY_TRADE_OPEN", True):
+        try:
+            sl_txt = f"{sl:.{int(info.digits)}f}" if sl is not None else "—"
+            tp_txt = f"{tp:.{int(info.digits)}f}" if tp is not None else "—"
+            acc = mt5.account_info()
+            cur = str(getattr(acc, "currency", "") or "USD") if acc is not None else "USD"
+            pos_extra = f"\nPosition ID: {pos_id_for_log}" if pos_id_for_log else ""
+            telegram_notify.notify(
+                f"meta-trader: orden ejecutada\n"
+                f"{symbol} {side} · lot {lot:.2f} · precio {execution_price:.{int(info.digits)}f} {cur}\n"
+                f"SL {sl_txt} · TP {tp_txt}\n"
+                f"Order {getattr(result, 'order', None)} · Deal {getattr(result, 'deal', None)}{pos_extra}",
+                dedup_key=None,
+            )
+        except Exception:
+            logging.exception("Telegram notify (open) failed (non-fatal).")
+
+    return True
+
+
+def _min_stop_distance_price(symbol_info, symbol_tick) -> float:
+    if symbol_info is None:
+        return 0.0
+    pt = float(getattr(symbol_info, "point", 0.0) or 0.0)
+    if pt <= 0:
+        return 0.0
+    stops_lvl = float(getattr(symbol_info, "trade_stops_level", 0.0) or 0.0)
+    freeze_lvl = float(getattr(symbol_info, "trade_freeze_level", 0.0) or 0.0)
+    lvl = max(stops_lvl, freeze_lvl, 0.0)
+    return float(lvl) * pt
+
+
+def _sl_is_valid_now(*, side: str, sl: float, info, tick) -> bool:
+    if sl is None or tick is None or info is None:
+        return True
+    min_dist = _min_stop_distance_price(info, tick)
+    bid = float(getattr(tick, "bid", 0.0) or 0.0)
+    ask = float(getattr(tick, "ask", 0.0) or 0.0)
+    if bid <= 0 or ask <= 0:
+        return True
+    if side == "BUY":
+        return sl < (bid - min_dist)
+    return sl > (ask + min_dist)
+
+
+def _modify_position_sl_tp(
+    symbol: str,
+    ticket: int,
+    sl: Optional[float],
+    tp: Optional[float],
+    *,
+    side: Optional[str] = None,
+    info=None,
+    tick=None,
+) -> bool:
+    if sl is not None and side in ("BUY", "SELL") and info is not None and tick is not None:
+        if not _sl_is_valid_now(side=side, sl=float(sl), info=info, tick=tick):
+            logging.warning(
+                "[%s] SLTP modify skipped: invalid SL for current price (side=%s sl=%s bid=%s ask=%s stops/freezes).",
+                symbol,
+                side,
+                sl,
+                getattr(tick, "bid", None),
+                getattr(tick, "ask", None),
+            )
+            return False
+
+    request = {
+        "action": mt5.TRADE_ACTION_SLTP,
+        "symbol": symbol,
+        "position": int(ticket),
+    }
+    if sl is not None:
+        request["sl"] = float(sl)
+    if tp is not None:
+        request["tp"] = float(tp)
+
+    result = mt5.order_send(request)
+    if result is None:
+        logging.error("[%s] SLTP modify returned None. request=%s last_error=%s", symbol, request, mt5.last_error())
+        return False
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        logging.error(
+            "[%s] SLTP modify failed. request=%s retcode=%s comment=%s last_error=%s",
+            symbol,
+            request,
+            getattr(result, "retcode", None),
+            getattr(result, "comment", ""),
+            mt5.last_error(),
+        )
+        return False
+    return True
+
+
+def _close_position_market(symbol: str, ticket: int, volume: float, side: str, comment: str = "bot_filter_exit") -> bool:
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        logging.error("[%s] Close market: no tick available.", symbol)
+        return False
+    if side == "BUY":
+        order_type = mt5.ORDER_TYPE_SELL
+        price = float(tick.bid)
+    else:
+        order_type = mt5.ORDER_TYPE_BUY
+        price = float(tick.ask)
+
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": float(volume),
+        "type": order_type,
+        "position": int(ticket),
+        "price": price,
+        "deviation": 30,
+        "magic": 0,
+        "comment": comment[:31],
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+    result = mt5.order_send(request)
+    if result is None:
+        logging.error("[%s] Close market returned None. last_error=%s", symbol, mt5.last_error())
+        return False
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        request["type_filling"] = mt5.ORDER_FILLING_FOK
+        result = mt5.order_send(request)
+        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+            rc = getattr(result, "retcode", "n/a") if result else "n/a"
+            cm = getattr(result, "comment", "") if result else ""
+            logging.error("[%s] Close market failed. retcode=%s comment=%s", symbol, rc, cm)
+            return False
+    return True
+
+
+def _apply_usd_sl_ladder(
+    cfg: Config,
+    symbol: str,
+    p,
+    pr: dict,
+    *,
+    side: Signal,
+    lot: float,
+    digits: int,
+    entry_price: float,
+    ticket: int,
+    profit: float,
+) -> None:
+    if ticket <= 0 or entry_price <= 0:
+        return
+
+    init_usd = abs(float(pr.get("usd_sl_ladder_initial_sl_money", cfg.usd_sl_ladder_initial_sl_money) or 0.8))
+    wait_be = max(0, int(pr.get("usd_ladder_wait_be_seconds", cfg.usd_ladder_wait_be_seconds) or 0))
+    step_s = max(0, int(pr.get("usd_ladder_step_seconds", cfg.usd_ladder_step_seconds) or 0))
+    max_lock = max(0, int(pr.get("usd_ladder_max_lock_usd", cfg.usd_ladder_max_lock_usd) or 0))
+
+    st = _USD_SL_LADDER_STATE.setdefault(
+        ticket,
+        {
+            "init_done": False,
+            "be_done": False,
+            "locked_usd": 0,
+            "last_ts": None,
+            "max_floating_profit": float(profit),
+        },
+    )
+    if "max_floating_profit" not in st:
+        st["max_floating_profit"] = float(profit)
+    if "open_ts" not in st:
+        st["open_ts"] = time.time()
+    age = time.time() - float(st["open_ts"])
+    cur_sl = float(getattr(p, "sl", 0.0) or 0.0)
+    now_ts = time.time()
+    info_sym = mt5.symbol_info(symbol)
+    tick = mt5.symbol_info_tick(symbol)
+    if info_sym is None or tick is None:
+        return
+    pt = float(getattr(info_sym, "point", 0.0) or 0.0) if info_sym is not None else 0.0
+
+    if not bool(st.get("init_done")):
+        tgt_init = _sl_price_for_max_loss_usd(symbol, side, entry_price, lot, init_usd, digits=digits)
+
+        ladder_recovery = False
+        if tgt_init is not None and cur_sl != 0.0:
+            already_tighter = (side == "BUY" and cur_sl > tgt_init) or (side == "SELL" and cur_sl < tgt_init)
+            if already_tighter:
+                ladder_recovery = True
+                st["micro_be_done"] = True
+                logging.info(
+                    "[%s] Recovery: SL %.*f más ajustado que init_sl %.*f → micro_be_done=True inferido",
+                    symbol,
+                    digits,
+                    cur_sl,
+                    digits,
+                    tgt_init,
+                )
+                locked_recovered = _profit_usd_at_sl(symbol, side, entry_price, lot, cur_sl, digits=digits)
+                if locked_recovered is not None and locked_recovered > 0:
+                    st["hwm_trail_lock_target_usd"] = float(locked_recovered)
+                    st["max_floating_profit"] = max(float(st["max_floating_profit"]), float(locked_recovered))
+                    logging.info(
+                        "[%s] Recovery: hwm_trail_lock_target_usd=%.3f inferido desde SL actual",
+                        symbol,
+                        locked_recovered,
+                    )
+
+        if tgt_init is not None:
+            if cur_sl == 0.0:
+                logging.info(
+                    "[%s] USD ladder: set initial SL ~-%.2f USD risk → SL=%.*f",
+                    symbol,
+                    init_usd,
+                    digits,
+                    tgt_init,
+                )
+                ok = _modify_position_sl_tp(symbol, ticket, tgt_init, None, side=side, info=info_sym, tick=tick)
+                _log_event(
+                    {
+                        "event": "USD_LADDER_INIT_SL",
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "symbol": symbol,
+                        "ticket": ticket,
+                        "side": side,
+                        "target_sl": tgt_init,
+                        "applied": bool(ok),
+                    }
+                )
+            else:
+                widen = (side == "BUY" and cur_sl > tgt_init) or (side == "SELL" and cur_sl < tgt_init)
+                if widen and not ladder_recovery:
+                    logging.info(
+                        "[%s] USD ladder: widen initial SL toward ~-%.2f USD risk (cur=%.*f → %.*f).",
+                        symbol,
+                        init_usd,
+                        digits,
+                        cur_sl,
+                        digits,
+                        tgt_init,
+                    )
+                    ok = _modify_position_sl_tp(symbol, ticket, tgt_init, None, side=side, info=info_sym, tick=tick)
+                    _log_event(
+                        {
+                            "event": "USD_LADDER_INIT_SL",
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "symbol": symbol,
+                            "ticket": ticket,
+                            "side": side,
+                            "target_sl": tgt_init,
+                            "applied": bool(ok),
+                        }
+                    )
+        st["init_done"] = True
+
+    st["max_floating_profit"] = max(float(st["max_floating_profit"]), float(profit))
+    mfe = float(st["max_floating_profit"])
+
+    be_offset = float(cfg.break_even_offset_points) * pt
+
+    if not bool(st.get("be_done")):
+        if age >= float(wait_be) and mfe > 0.0:
+            if side == "BUY":
+                be_sl = round(entry_price + be_offset, digits)
+                should = (cur_sl == 0.0) or (cur_sl < be_sl)
+            else:
+                be_sl = round(entry_price - be_offset, digits)
+                should = (cur_sl == 0.0) or (cur_sl > be_sl)
+            if should and _sl_is_valid_now(side=side, sl=float(be_sl), info=info_sym, tick=tick):
+                logging.info(
+                    "[%s] USD ladder: BE after %.0fs (profit=%.2f mfe=%.2f) → SL=%.*f",
+                    symbol,
+                    age,
+                    profit,
+                    mfe,
+                    digits,
+                    be_sl,
+                )
+                ok = _modify_position_sl_tp(symbol, ticket, be_sl, None, side=side, info=info_sym, tick=tick)
+                _log_event(
+                    {
+                        "event": "USD_LADDER_BREAK_EVEN",
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "symbol": symbol,
+                        "ticket": ticket,
+                        "side": side,
+                        "age_sec": round(age, 1),
+                        "profit": profit,
+                        "max_floating_profit": round(mfe, 4),
+                        "new_sl": be_sl,
+                        "applied": bool(ok),
+                    }
+                )
+                if ok:
+                    st["be_done"] = True
+                    st["last_ts"] = now_ts
+
+    micro_be_trig = float(pr.get("micro_be_trigger_money", getattr(cfg, "micro_be_trigger_money", 0.0)) or 0.0)
+    if micro_be_trig > 0 and not bool(st.get("micro_be_done")) and not bool(st.get("be_done")) and profit >= micro_be_trig:
+        be_off = float(cfg.break_even_offset_points) * pt
+        if side == "BUY":
+            micro_sl = round(entry_price + be_off, digits)
+            should_micro = (cur_sl == 0.0) or (cur_sl < micro_sl)
+        else:
+            micro_sl = round(entry_price - be_off, digits)
+            should_micro = (cur_sl == 0.0) or (cur_sl > micro_sl)
+        if should_micro and _sl_is_valid_now(side=side, sl=float(micro_sl), info=info_sym, tick=tick):
+            ok_mb = _modify_position_sl_tp(symbol, ticket, micro_sl, None, side=side, info=info_sym, tick=tick)
+            if ok_mb:
+                st["micro_be_done"] = True
+                logging.info(
+                    "[%s] Micro-BE applied at profit=%.3f (trigger=%.2f) → SL %.*f",
+                    symbol,
+                    profit,
+                    micro_be_trig,
+                    digits,
+                    micro_sl,
+                )
+                _log_event(
+                    {
+                        "event": "USD_LADDER_MICRO_BE",
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "symbol": symbol,
+                        "ticket": ticket,
+                        "side": side,
+                        "profit": profit,
+                        "trigger_money": micro_be_trig,
+                        "new_sl": micro_sl,
+                        "applied": True,
+                    }
+                )
+
+    hwm_trail_pct = float(pr.get("hwm_trail_pct", getattr(cfg, "hwm_trail_pct", 0.0)) or 0.0)
+    hwm = float(st.get("max_floating_profit", 0.0))
+
+    if hwm_trail_pct > 0 and (bool(st.get("be_done")) or bool(st.get("micro_be_done"))) and hwm > 0 and profit > 0:
+        lock_target = hwm * (1.0 - hwm_trail_pct)
+        floor_usd = float(int(st.get("locked_usd") or 0))
+        if floor_usd > 0:
+            lock_target = max(lock_target, floor_usd)
+        hwm_prev_lock = float(st.get("hwm_trail_lock_target_usd", 0.0) or 0.0)
+
+        if lock_target > hwm_prev_lock + 1e-6:
+            hwm_sl = _sl_price_to_lock_profit_usd(
+                symbol, side, entry_price, lot, float(lock_target), digits=digits
+            )
+            if hwm_sl is not None and _sl_is_valid_now(side=side, sl=float(hwm_sl), info=info_sym, tick=tick):
+                ok_hwm = _modify_position_sl_tp(symbol, ticket, float(hwm_sl), None, side=side, info=info_sym, tick=tick)
+                if ok_hwm:
+                    st["hwm_trail_lock_target_usd"] = float(lock_target)
+                    logging.info(
+                        "[%s] HWM trail: hwm=%.3f trail=%.0f%% lock_target=%.3f → SL %.*f",
+                        symbol,
+                        hwm,
+                        hwm_trail_pct * 100.0,
+                        lock_target,
+                        digits,
+                        hwm_sl,
+                    )
+                    _log_event(
+                        {
+                            "event": "USD_LADDER_HWM_TRAIL",
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "symbol": symbol,
+                            "ticket": ticket,
+                            "side": side,
+                            "hwm": round(hwm, 4),
+                            "hwm_trail_pct": hwm_trail_pct,
+                            "lock_target": round(lock_target, 6),
+                            "new_sl": hwm_sl,
+                            "applied": True,
+                        }
+                    )
+
+    stagnant_timeout = float(pr.get("stagnant_timeout_minutes", getattr(cfg, "stagnant_timeout_minutes", 0.0)) or 0.0)
+    stagnant_threshold = float(pr.get("stagnant_max_profit_threshold", getattr(cfg, "stagnant_max_profit_threshold", 0.0)) or 0.0)
+    age_sec = age
+    max_fp_here = float(st.get("max_floating_profit", 0.0) or 0.0)
+
+    if (
+        stagnant_timeout > 0
+        and stagnant_threshold > 0
+        and not bool(st.get("stagnant_closed"))
+        and age_sec > stagnant_timeout * 60.0
+        and max_fp_here < stagnant_threshold
+    ):
+        logging.warning(
+            "[%s] Stagnant position timeout: age=%.0fs max_fp=%.3f threshold=%.3f → closing",
+            symbol,
+            age_sec,
+            max_fp_here,
+            stagnant_threshold,
+        )
+        close_ok = _close_position_market(symbol, ticket, lot, side, comment="meta_stagnant_timeout")
+        if close_ok:
+            st["stagnant_closed"] = True
+            _log_event(
+                {
+                    "event": "STAGNANT_TIMEOUT_CLOSE",
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "symbol": symbol,
+                    "ticket": ticket,
+                    "age_seconds": round(age_sec, 1),
+                    "max_floating_profit": max_fp_here,
+                    "threshold": stagnant_threshold,
+                }
+            )
+        return
+
+    locked = int(st.get("locked_usd") or 0)
+    last_ts = st.get("last_ts")
+    if max_lock > 0 and locked >= max_lock:
+        return
+    if last_ts is None:
+        st["last_ts"] = float(now_ts) - float(step_s)
+        last_ts = st["last_ts"]
+    if (now_ts - float(last_ts)) < float(step_s):
+        return
+
+    target_k = int(float(profit) // 1.0)
+    if max_lock > 0:
+        target_k = min(int(max_lock), int(target_k))
+    if target_k <= locked:
+        return
+
+    cur_sl2 = float(getattr(p, "sl", 0.0) or 0.0)
+    applied_k: int | None = None
+    applied_sl: float | None = None
+    attempted: list[int] = []
+    for k in range(int(target_k), int(locked), -1):
+        attempted.append(int(k))
+        lock_sl = _sl_price_to_lock_profit_usd(symbol, side, entry_price, lot, float(k), digits=digits)
+        if lock_sl is None:
+            continue
+
+        if side == "BUY":
+            should_lock = (cur_sl2 == 0.0) or (lock_sl > cur_sl2)
+        else:
+            should_lock = (cur_sl2 == 0.0) or (lock_sl < cur_sl2)
+        if not should_lock:
+            st["locked_usd"] = int(k)
+            st["be_done"] = True
+            st["last_ts"] = now_ts
+            return
+
+        if not _sl_is_valid_now(side=side, sl=float(lock_sl), info=info_sym, tick=tick):
+            continue
+
+        logging.info(
+            "[%s] USD ladder: lock +$%d (profit=%.2f) → SL=%.*f",
+            symbol,
+            int(k),
+            profit,
+            digits,
+            lock_sl,
+        )
+        ok = _modify_position_sl_tp(symbol, ticket, lock_sl, None, side=side, info=info_sym, tick=tick)
+        if ok:
+            applied_k = int(k)
+            applied_sl = float(lock_sl)
+            break
+
+    _log_event(
+        {
+            "event": "USD_LADDER_LOCK",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "symbol": symbol,
+            "ticket": ticket,
+            "side": side,
+            "lock_usd": int(target_k),
+            "attempted_rungs": attempted,
+            "applied_rung": applied_k,
+            "profit": profit,
+            "new_sl": applied_sl,
+            "applied": bool(applied_k is not None),
+        }
+    )
+    if applied_k is not None:
+        st["locked_usd"] = int(applied_k)
+        st["be_done"] = True
+        st["last_ts"] = now_ts
+
+
+def _money_at_distance(symbol: str, lot: float, distance_price: float) -> Optional[float]:
+    info = mt5.symbol_info(symbol)
+    if info is None or lot <= 0 or distance_price <= 0:
+        return None
+    tick_value = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+    tick_size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+    if tick_value <= 0 or tick_size <= 0:
+        return None
+    return (float(distance_price) / tick_size) * tick_value * lot
+
+
+def _apply_atr_profit_trail(
+    cfg: Config,
+    symbol: str,
+    p,
+    pr: dict,
+    *,
+    side: Signal,
+    lot: float,
+    digits: int,
+    entry_price: float,
+    ticket: int,
+    profit: float,
+) -> None:
+    if ticket <= 0 or entry_price <= 0 or lot <= 0:
+        return
+    info = mt5.symbol_info(symbol)
+    tick = mt5.symbol_info_tick(symbol)
+    if info is None or tick is None:
+        return
+
+    cur_sl = float(getattr(p, "sl", 0.0) or 0.0)
+    if cur_sl <= 0:
+        return
+
+    sl_distance = abs(float(entry_price) - float(cur_sl))
+    initial_risk_money = _money_at_distance(symbol, lot, sl_distance)
+    if initial_risk_money is None or initial_risk_money <= 0:
+        return
+
+    activation_mult = float(
+        pr.get("atr_profit_trail_activation_mult", cfg.atr_profit_trail_activation_mult) or 1.5
+    )
+    activation_profit = activation_mult * initial_risk_money
+
+    if float(profit) < activation_profit:
+        return
+
+    atr_period = int(pr.get("atr_profit_trail_atr_period", cfg.atr_profit_trail_atr_period) or 14)
+    atr_mult = float(pr.get("atr_profit_trail_atr_mult", cfg.atr_profit_trail_atr_mult) or 2.5)
+    atr_val = get_atr(symbol, mt5.TIMEFRAME_M15, atr_period)
+    if atr_val is None or atr_val <= 0:
+        return
+
+    trail_distance = float(atr_val) * atr_mult
+    price_now = float(tick.bid if side == "BUY" else tick.ask)
+
+    if side == "BUY":
+        candidate_sl = round(price_now - trail_distance, digits)
+        is_tighter = candidate_sl > cur_sl
+    else:
+        candidate_sl = round(price_now + trail_distance, digits)
+        is_tighter = candidate_sl < cur_sl
+
+    if not is_tighter:
+        return
+
+    if not _sl_is_valid_now(side=side, sl=float(candidate_sl), info=info, tick=tick):
+        return
+
+    point = float(getattr(info, "point", 0.0) or 0.0)
+    min_step = point * 0.5
+    if min_step > 0 and abs(candidate_sl - cur_sl) <= min_step:
+        return
+
+    logging.info(
+        "[%s] ATR profit trail: profit=%.2f act_thr=%.2f init_risk=%.2f ATR=%.5f mult=%.2f → SL %.*f → %.*f",
+        symbol,
+        profit,
+        activation_profit,
+        initial_risk_money,
+        atr_val,
+        atr_mult,
+        digits,
+        cur_sl,
+        digits,
+        candidate_sl,
+    )
+    ok = _modify_position_sl_tp(symbol, ticket, float(candidate_sl), None, side=side, info=info, tick=tick)
+    _log_event(
+        {
+            "event": "ATR_PROFIT_TRAIL",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "symbol": symbol,
+            "ticket": ticket,
+            "side": side,
+            "profit": round(float(profit), 4),
+            "activation_profit": round(float(activation_profit), 4),
+            "initial_risk_money": round(float(initial_risk_money), 4),
+            "atr": round(float(atr_val), 6),
+            "atr_period": atr_period,
+            "atr_mult": atr_mult,
+            "prev_sl": cur_sl,
+            "new_sl": candidate_sl,
+            "applied": bool(ok),
+        }
+    )
+
+
+def manage_positions(cfg: Config) -> None:
+    positions = mt5.positions_get()
+    if positions is None:
+        return
+
+    open_managed: set[int] = set()
+    for _p0 in positions:
+        if not _position_is_managed_by_bot(_p0, cfg):
+            continue
+        _tk = int(getattr(_p0, "ticket", 0) or 0)
+        if _tk > 0:
+            open_managed.add(_tk)
+    for _tk in list(_PROFIT_LOCK_PEAK_PROFIT.keys()):
+        if _tk not in open_managed:
+            del _PROFIT_LOCK_PEAK_PROFIT[_tk]
+    for _tk in list(_USD_SL_LADDER_STATE.keys()):
+        if _tk not in open_managed:
+            del _USD_SL_LADDER_STATE[_tk]
+
+    for p in positions:
+        if not _position_is_managed_by_bot(p, cfg):
+            continue
+
+        symbol = getattr(p, "symbol", None)
+        if not symbol:
+            continue
+
+        profit = float(getattr(p, "profit", 0.0) or 0.0)
+        info = mt5.symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+        if info is None or tick is None:
+            continue
+
+        pr = _effective_params(cfg, symbol)
+        be_trig = float(pr["break_even_trigger_money"])
+        trail_trig = float(pr["trail_trigger_money"])
+        trail_sl_m = float(pr["trail_new_sl_money"])
+        trail_tp_m = float(pr["trail_new_tp_money"])
+
+        side = "BUY" if int(getattr(p, "type", -1)) == mt5.POSITION_TYPE_BUY else "SELL"
+        lot = float(getattr(p, "volume", cfg.lot) or cfg.lot)
+        digits = int(info.digits)
+        entry_price = float(getattr(p, "price_open", 0.0) or 0.0)
+        ticket = int(getattr(p, "ticket", 0) or 0)
+
+        if bool(pr.get("filter_exit_enabled", False)) and ticket > 0:
+            min_profit = float(pr.get("filter_exit_min_profit_money", 0.0) or 0.0)
+            if profit >= min_profit:
+                adx_now = get_adx(symbol, mt5.TIMEFRAME_M15, cfg.adx_period_m15)
+                adx_thr_raw = float(pr.get("filter_exit_adx_min", 0.0) or 0.0)
+                adx_threshold = adx_thr_raw if adx_thr_raw > 0 else float(pr["adx_min"])
+                ema_dir = ema_trend(symbol, int(pr["ema_fast_m15"]), int(pr["ema_slow_m15"]))
+                adx_broken = adx_now is not None and adx_now < adx_threshold
+                ema_against = (side == "BUY" and ema_dir == "DOWN") or (side == "SELL" and ema_dir == "UP")
+                require_ema = bool(pr.get("filter_exit_require_ema_reversal", True))
+                should_exit = False
+                reason_parts: list[str] = []
+                if require_ema:
+                    if adx_broken and ema_against:
+                        should_exit = True
+                        reason_parts = [f"ADX={adx_now:.1f}<{adx_threshold:.1f}", f"EMA={ema_dir} vs {side}"]
+                else:
+                    if adx_broken:
+                        should_exit = True
+                        reason_parts.append(f"ADX={adx_now:.1f}<{adx_threshold:.1f}")
+                    elif ema_against:
+                        should_exit = True
+                        reason_parts.append(f"EMA={ema_dir} vs {side}")
+                if should_exit:
+                    reason_str = " & ".join(reason_parts)
+                    logging.info(
+                        "[%s] Filter exit (%s). Closing at market. profit=%.2f",
+                        symbol, reason_str, profit,
+                    )
+                    ok = _close_position_market(symbol, ticket, lot, side, comment="bot_filter_exit")
+                    _log_event(
+                        {
+                            "event": "FILTER_EXIT",
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                            "symbol": symbol,
+                            "ticket": ticket,
+                            "side": side,
+                            "profit": profit,
+                            "adx": round(adx_now, 2) if adx_now is not None else None,
+                            "adx_threshold": adx_threshold,
+                            "ema_dir": ema_dir,
+                            "reason": reason_str,
+                            "closed": bool(ok),
+                        }
+                    )
+                    if ok:
+                        continue
+
+        ladder_on = bool(cfg.usd_sl_ladder_enabled)
+        if ladder_on and ticket > 0 and entry_price > 0:
+            _apply_usd_sl_ladder(
+                cfg,
+                symbol,
+                p,
+                pr,
+                side=side,
+                lot=lot,
+                digits=digits,
+                entry_price=entry_price,
+                ticket=ticket,
+                profit=profit,
+            )
+            continue
+
+        if bool(cfg.atr_profit_trail_enabled) and ticket > 0 and entry_price > 0:
+            _apply_atr_profit_trail(
+                cfg,
+                symbol,
+                p,
+                pr,
+                side=side,
+                lot=lot,
+                digits=digits,
+                entry_price=entry_price,
+                ticket=ticket,
+                profit=profit,
+            )
+            continue
+
+        if profit >= be_trig and entry_price > 0:
+            cur_sl = float(getattr(p, "sl", 0.0) or 0.0)
+            be_offset = float(cfg.break_even_offset_points) * float(info.point or 0.0)
+            if side == "BUY":
+                be_sl = round(entry_price + be_offset, digits)
+                should_set = (cur_sl == 0.0) or (cur_sl < be_sl)
+            else:
+                be_sl = round(entry_price - be_offset, digits)
+                should_set = (cur_sl == 0.0) or (cur_sl > be_sl)
+
+            if should_set and ticket > 0:
+                logging.info("[%s] Break-even: profit=%.2f -> SL=%.*f", symbol, profit, digits, be_sl)
+                _modify_position_sl_tp(symbol, ticket, be_sl, None)
+                _log_event(
+                    {
+                        "event": "BREAK_EVEN",
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "symbol": symbol,
+                        "ticket": ticket,
+                        "side": side,
+                        "profit": profit,
+                        "new_sl": be_sl,
+                    }
+                )
+
+        if bool(pr.get("profit_lock_enabled", False)) and ticket > 0 and entry_price > 0:
+            step_m = float(pr.get("profit_lock_step_money", 1.0) or 1.0)
+            sec_m = float(pr.get("profit_lock_secure_money", 1.0) or 1.0)
+            if step_m > 0 and sec_m > 0:
+                prev_peak = _PROFIT_LOCK_PEAK_PROFIT.get(ticket, profit)
+                peak = max(float(prev_peak), float(profit))
+                _PROFIT_LOCK_PEAK_PROFIT[ticket] = peak
+                n = int(peak // step_m)
+                lock_usd = float(n) * sec_m
+                if lock_usd > 0:
+                    lock_sl = _sl_price_to_lock_profit_usd(
+                        symbol, side, entry_price, lot, lock_usd, digits=digits
+                    )
+                    if lock_sl is not None:
+                        cur_sl2 = float(getattr(p, "sl", 0.0) or 0.0)
+                        if side == "BUY":
+                            pl_should = (cur_sl2 == 0.0) or (lock_sl > cur_sl2)
+                        else:
+                            pl_should = (cur_sl2 == 0.0) or (lock_sl < cur_sl2)
+                        if pl_should:
+                            logging.info(
+                                "[%s] Profit lock: peak=%.2f n=%d lock$≈%.2f -> SL=%.*f",
+                                symbol, peak, n, lock_usd, digits, lock_sl,
+                            )
+                            pl_ok = _modify_position_sl_tp(symbol, ticket, lock_sl, None)
+                            _log_event(
+                                {
+                                    "event": "PROFIT_LOCK_LADDER",
+                                    "ts": datetime.now().isoformat(timespec="seconds"),
+                                    "symbol": symbol,
+                                    "ticket": ticket,
+                                    "side": side,
+                                    "profit_now": round(profit, 4),
+                                    "peak_profit": round(peak, 4),
+                                    "step_usd": step_m,
+                                    "secure_per_step_usd": sec_m,
+                                    "rungs": n,
+                                    "lock_usd": lock_usd,
+                                    "new_sl": lock_sl,
+                                    "applied": bool(pl_ok),
+                                }
+                            )
+
+        skip_tt = bool(pr.get("profit_lock_enabled", False)) and bool(
+            getattr(cfg, "skip_tight_trail_when_profit_lock", True)
+        )
+        tight_applied = False
+        if (not skip_tt) and bool(pr.get("tight_trail_enabled", False)) and ticket > 0:
+            tight_trig = float(pr.get("tight_trail_trigger_money", 0.0) or 0.0)
+            if profit >= tight_trig:
+                tt_period = int(pr.get("tight_trail_atr_period", 14) or 14)
+                tt_mult = float(pr.get("tight_trail_atr_mult", 1.2) or 1.2)
+                atr_val = get_atr(symbol, mt5.TIMEFRAME_M15, tt_period)
+                if atr_val is not None and atr_val > 0:
+                    distance = atr_val * tt_mult
+                    price_now = float(tick.bid if side == "BUY" else tick.ask)
+                    cur_sl = float(getattr(p, "sl", 0.0) or 0.0)
+                    if side == "BUY":
+                        candidate_sl = round(price_now - distance, digits)
+                        is_tighter = (cur_sl == 0.0) or (candidate_sl > cur_sl)
+                    else:
+                        candidate_sl = round(price_now + distance, digits)
+                        is_tighter = (cur_sl == 0.0) or (candidate_sl < cur_sl)
+
+                    min_step = float(info.point or 0.0) * 0.5
+                    if is_tighter and (cur_sl == 0.0 or abs(candidate_sl - cur_sl) > min_step):
+                        logging.info(
+                            "[%s] Tight trail (profit=%.2f, ATR=%.5f, mult=%.2f). SL=%.*f -> %.*f",
+                            symbol, profit, atr_val, tt_mult, digits, cur_sl, digits, candidate_sl,
+                        )
+                        ok = _modify_position_sl_tp(symbol, ticket, candidate_sl, None)
+                        _log_event(
+                            {
+                                "event": "TIGHT_TRAIL",
+                                "ts": datetime.now().isoformat(timespec="seconds"),
+                                "symbol": symbol,
+                                "ticket": ticket,
+                                "side": side,
+                                "profit": profit,
+                                "atr": round(atr_val, 6),
+                                "atr_period": tt_period,
+                                "atr_mult": tt_mult,
+                                "prev_sl": cur_sl if cur_sl else None,
+                                "new_sl": candidate_sl,
+                                "applied": bool(ok),
+                            }
+                        )
+                        tight_applied = True
+
+        if tight_applied:
+            continue
+
+        if profit < trail_trig:
+            continue
+
+        sl_dist = _price_distance_for_money(symbol, lot, trail_sl_m, side)
+        tp_dist = _price_distance_for_money(symbol, lot, trail_tp_m, side)
+        if sl_dist is None or tp_dist is None:
+            continue
+
+        price_now = float(tick.bid if side == "BUY" else tick.ask)
+
+        if side == "BUY":
+            new_sl = round(price_now - sl_dist, digits)
+            new_tp = round(price_now + tp_dist, digits)
+        else:
+            new_sl = round(price_now + sl_dist, digits)
+            new_tp = round(price_now - tp_dist, digits)
+
+        cur_sl = getattr(p, "sl", 0.0) or 0.0
+        cur_tp = getattr(p, "tp", 0.0) or 0.0
+        if cur_sl and abs(float(cur_sl) - new_sl) < (info.point * 0.5):
+            new_sl = None
+        if cur_tp and abs(float(cur_tp) - new_tp) < (info.point * 0.5):
+            new_tp = None
+
+        if new_sl is None and new_tp is None:
+            continue
+
+        if ticket <= 0:
+            continue
+
+        logging.info(
+            "[%s] Trailing (profit=%.2f). Updating SL=%s TP=%s",
+            symbol,
+            profit,
+            f"{new_sl:.{digits}f}" if new_sl is not None else "keep",
+            f"{new_tp:.{digits}f}" if new_tp is not None else "keep",
+        )
+
+        _modify_position_sl_tp(symbol, ticket, new_sl, new_tp)
+        _log_event(
+            {
+                "event": "TRAILING_UPDATE",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "symbol": symbol,
+                "ticket": ticket,
+                "profit": profit,
+                "new_sl": new_sl,
+                "new_tp": new_tp,
+            }
+        )
+
+
+def _maybe_invert_decision(cfg: Config, symbol: str, decision: Signal) -> Signal:
+    if not bool(getattr(cfg, "invert_signals", False)):
+        return decision
+    if decision == "BUY":
+        flipped: Signal = "SELL"
+    elif decision == "SELL":
+        flipped = "BUY"
+    else:
+        return decision
+    logging.info(
+        "[%s] SIGNAL_INVERT: original=%s -> traded=%s (BOT_INVERT_SIGNALS=1)",
+        symbol, decision, flipped,
+    )
+    _log_event(
+        {
+            "event": "SIGNAL_INVERT",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "symbol": symbol,
+            "original": decision,
+            "inverted": flipped,
+        }
+    )
+    return flipped
+
+
+def _maybe_trade_symbol(cfg: Config, symbol: str) -> None:
+    now = datetime.now()
+    p = _effective_params(cfg, symbol)
+    trend_h4 = get_trend_h4(symbol)
+    rsi_h4 = get_rsi_h4(symbol)
+    signal = get_signal_m15(symbol)
+    ema_dir = ema_trend(symbol, int(p["ema_fast_m15"]), int(p["ema_slow_m15"]))
+    adx = get_adx(symbol, mt5.TIMEFRAME_M15, cfg.adx_period_m15)
+
+    ok_spread, spread, avg_spread = _is_spread_ok(cfg, symbol, max_spread_points=float(p["max_spread_points"]))
+    if spread is None:
+        spread_s = "n/a"
+    elif cfg.spread_dynamic_enabled and avg_spread is not None:
+        spread_s = f"{spread:.1f} pts (avg {avg_spread:.1f})"
+    else:
+        spread_s = f"{spread:.1f} pts"
+    active = _is_market_active_m15(symbol, cfg.min_avg_range_points_m15)
+
+    slope_trend = _m15_slope_trend(symbol, n_closes=int(p["price_slope_n"]))
+
+    logging.info(
+        "[%s] H4=%s | M15=%s | EMA(%d/%d)=%s | ADX=%.2f | price_slope%d=%s | Spread=%s | Active=%s",
+        symbol,
+        trend_h4,
+        signal,
+        int(p["ema_fast_m15"]),
+        int(p["ema_slow_m15"]),
+        ema_dir,
+        adx if adx is not None else 0.0,
+        int(p["price_slope_n"]),
+        slope_trend,
+        spread_s,
+        "yes" if active is True else ("no" if active is False else "n/a"),
+    )
+
+    decision = generate_signal(
+        trend_h4=trend_h4,
+        signal_m15=signal,
+        ema_dir=ema_dir,
+        adx=adx,
+        adx_min=float(p["adx_min"]),
+        symbol=symbol,
+        crypto_sell_requires_h4_down=cfg.crypto_sell_requires_h4_down,
+        allow_flat_h4=True,
+        m15_price_slope=slope_trend,
+        price_slope_filter_enabled=bool(p["price_slope_filter_enabled"]),
+        ema_fast=get_ema(symbol, mt5.TIMEFRAME_M15, int(p["ema_fast_m15"])),
+        ema_slow=get_ema(symbol, mt5.TIMEFRAME_M15, int(p["ema_slow_m15"])),
+        rsi_h4=rsi_h4,
+        rsi_h4_filter_enabled=bool(p.get("rsi_h4_filter_enabled", False)),
+        rsi_h4_oversold_threshold=float(p.get("rsi_h4_oversold_threshold", 35.0)),
+        rsi_h4_overbought_threshold=float(p.get("rsi_h4_overbought_threshold", 65.0)),
+    )
+
+    decision = _maybe_invert_decision(cfg, symbol, decision)
+
+    if decision != "NONE":
+        ext_pct = float(p.get("extension_filter_max_pct", 4.0))
+        ext_bars = int(p.get("extension_filter_h1_bars", 16))
+        if _movement_is_extended(symbol, decision,
+                                 lookback_h1_bars=ext_bars,
+                                 max_extension_pct=ext_pct):
+            logging.info(
+                "[%s] No trade: movimiento extendido >%.1f%% desde extremo H1 (%d bars).",
+                symbol, ext_pct, ext_bars,
+            )
+            _log_event({
+                "event": "EXTENSION_FILTER_SKIP",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "symbol": symbol,
+                "side": decision,
+                "extension_filter_max_pct": ext_pct,
+                "extension_filter_h1_bars": ext_bars,
+            })
+            decision = "NONE"
+
+    if decision == "NONE":
+        logging.info("[%s] No trade: conditions not aligned.", symbol)
+        return
+
+    if not _preflight_new_entry(
+        cfg,
+        symbol,
+        side=decision,
+        now=now,
+        adx=adx,
+        p=p,
+        active=active,
+        ok_spread=ok_spread,
+        spread=spread,
+        avg_spread=avg_spread,
+    ):
+        return
+
+    open_trade(cfg, symbol, decision)
+
+
+def generate_signal(
+    *,
+    trend_h4: Trend,
+    signal_m15: Signal,
+    ema_dir: Trend,
+    adx: Optional[float],
+    adx_min: float,
+    symbol: str = "",
+    crypto_sell_requires_h4_down: bool = True,
+    allow_flat_h4: bool = True,
+    m15_price_slope: Trend = "FLAT",
+    price_slope_filter_enabled: bool = False,
+    ema_fast: Optional[float] = None,
+    ema_slow: Optional[float] = None,
+    rsi_h4: Optional[float] = None,
+    rsi_h4_filter_enabled: bool = False,
+    rsi_h4_oversold_threshold: float = 35.0,
+    rsi_h4_overbought_threshold: float = 65.0,
+) -> Signal:
+    sym_trim = symbol.strip()
+    sym_k = sym_trim.upper() if sym_trim else ""
+
+    sell_probe = signal_m15 == "SELL" and ema_dir == "DOWN"
+    if sell_probe and adx is not None and adx >= adx_min:
+        relaxed_crypto = symbol_uses_crypto_relaxed_m15(sym_k) if sym_k else False
+        logging.info(
+            "[%s] SELL gate: trend_h4=%s ema_dir=%s relaxed=%s requires_h4_down=%s",
+            sym_k if sym_k else "?",
+            trend_h4,
+            ema_dir,
+            relaxed_crypto,
+            crypto_sell_requires_h4_down,
+        )
+
+    sp = StrategyParams(
+        adx_min=adx_min,
+        allow_flat_h4=allow_flat_h4,
+        crypto_sell_requires_h4_down=crypto_sell_requires_h4_down,
+        price_slope_filter_enabled=price_slope_filter_enabled,
+        rsi_h4_filter_enabled=rsi_h4_filter_enabled,
+        rsi_h4_oversold_threshold=rsi_h4_oversold_threshold,
+        rsi_h4_overbought_threshold=rsi_h4_overbought_threshold,
+    )
+    feat = Features(
+        trend_h4=trend_h4,
+        signal_m15=signal_m15,
+        ema_dir=ema_dir,
+        ema_fast=ema_fast,
+        ema_slow=ema_slow,
+        adx=adx,
+        price_slope_m15=m15_price_slope,
+        rsi_h4=rsi_h4,
+    )
+    return decide(sp, feat, symbol=(sym_trim or None))
+
+
+def _try_execute_trade_through_gates(cfg: Config, symbol: str, decision: Signal, *, now: datetime) -> bool:
+    if decision == "NONE":
+        return False
+    p = _effective_params(cfg, symbol)
+    adx = get_adx(symbol, mt5.TIMEFRAME_M15, cfg.adx_period_m15)
+    ok_spread, spread, avg_spread = _is_spread_ok(cfg, symbol, max_spread_points=float(p["max_spread_points"]))
+    active = _is_market_active_m15(symbol, cfg.min_avg_range_points_m15)
+    if not _preflight_new_entry(
+        cfg,
+        symbol,
+        side=decision,
+        now=now,
+        adx=adx,
+        p=p,
+        active=active,
+        ok_spread=ok_spread,
+        spread=spread,
+        avg_spread=avg_spread,
+    ):
+        return False
+    return execute_trade(cfg, symbol, decision)
+
+
+def execute_trade(cfg: Config, symbol: str, signal: Signal) -> bool:
+    if signal == "BUY":
+        return open_trade(cfg, symbol, "BUY")
+    if signal == "SELL":
+        return open_trade(cfg, symbol, "SELL")
+    return False
+
+
+def _xauusd_simple_market_trend(symbol: str) -> Trend:
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H4, 1, 2)
+    if rates is None or len(rates) < 2:
+        logging.warning("[%s] XAUUSD parallel: not enough H4 data for trend.", symbol)
+        return "FLAT"
+    last_close = float(rates[0]["close"])
+    prev_close = float(rates[1]["close"])
+    if last_close > prev_close:
+        return "UP"
+    if last_close < prev_close:
+        return "DOWN"
+    return "FLAT"
+
+
+def manage_xauusd_parallel_positions(cfg: Config) -> None:
+    if not bool(cfg.xauusd_parallel_enabled):
+        return
+
+    sym = _xauusd_parallel_symbol(cfg)
+    tp_money = float(getattr(cfg, "xauusd_parallel_tp_money", 0.15) or 0.15)
+    
+    # NUEVO: Límite de pérdida automática de 1 dólar (-1.0) para XAUUSD
+    max_loss_money = -1.0
+
+    for p in _xauusd_parallel_positions(cfg):
+        profit = float(getattr(p, "profit", 0.0) or 0.0)
+        ticket = int(getattr(p, "ticket", 0) or 0)
+        side = _position_side(p)
+        lot = float(getattr(p, "volume", cfg.xauusd_parallel_lot) or cfg.xauusd_parallel_lot)
+        if side is None or ticket <= 0:
+            continue
+
+        # Cierre por Take Profit (ganancia de apenas unos centavos: 0.15)
+        if profit >= tp_money:
+            logging.info(
+                "[%s] XAUUSD parallel TP hit: profit=%.4f >= %.4f. Closing ticket=%d.",
+                sym,
+                profit,
+                tp_money,
+                ticket,
+            )
+            ok = _close_position_market(sym, ticket, lot, side, comment="xauusd_parallel_tp")
+            _log_event(
+                {
+                    "event": "XAUUSD_PARALLEL_CLOSE",
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "symbol": sym,
+                    "ticket": ticket,
+                    "side": side,
+                    "profit": round(profit, 4),
+                    "tp_money": tp_money,
+                    "reason": "take_profit",
+                    "closed": bool(ok),
+                    "magic": int(cfg.xauusd_parallel_magic),
+                }
+            )
+        # NUEVO: Cierre automático si la pérdida alcanza o supera 1 dólar (-1.0)
+        elif profit <= max_loss_money:
+            logging.info(
+                "[%s] XAUUSD parallel SL limit hit: profit=%.4f <= %.4f. Closing ticket=%d to prevent deeper loss.",
+                sym,
+                profit,
+                max_loss_money,
+                ticket,
+            )
+            ok = _close_position_market(sym, ticket, lot, side, comment="xauusd_parallel_loss_limit")
+            _log_event(
+                {
+                    "event": "XAUUSD_PARALLEL_CLOSE",
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "symbol": sym,
+                    "ticket": ticket,
+                    "side": side,
+                    "profit": round(profit, 4),
+                    "loss_limit_money": max_loss_money,
+                    "reason": "max_loss_limit",
+                    "closed": bool(ok),
+                    "magic": int(cfg.xauusd_parallel_magic),
+                }
+            )
+
+
+def open_xauusd_parallel_trade(cfg: Config, side: Signal) -> bool:
+    if side not in ("BUY", "SELL"):
+        return False
+    if not bool(cfg.xauusd_parallel_enabled):
+        return False
+
+    sym = _xauusd_parallel_symbol(cfg)
+    max_pos = max(1, int(getattr(cfg, "xauusd_parallel_max_positions", 1) or 1))
+    if len(_xauusd_parallel_positions(cfg)) >= max_pos:
+        logging.debug("[%s] XAUUSD parallel: max positions reached (%d).", sym, max_pos)
+        return False
+
+    if not _ensure_symbol(sym):
+        return False
+
+    max_spread = float(getattr(cfg, "xauusd_parallel_max_spread_points", 55.0) or 55.0)
+    ok_spread, spread, _avg_spread = _is_spread_ok(sym, max_spread_points=max_spread) if hasattr(_is_spread_ok, '__code__') and _is_spread_ok.__code__.co_argcount >= 3 else (True, 0.0, 0.0)
+    # Compatibilidad con la firma actual de _is_spread_ok(cfg, symbol, ...)
+    ok_spread, spread, _avg_spread = _is_spread_ok(cfg, sym, max_spread_points=max_spread)
+    if not ok_spread:
+        if spread is None:
+            logging.warning("[%s] XAUUSD parallel: could not read spread. Skipping.", sym)
+        else:
+            logging.info(
+                "[%s] XAUUSD parallel: spread too high (%.1f > %.1f pts). Skipping.",
+                sym,
+                spread,
+                max_spread,
+            )
+        return False
+
+    tick = mt5.symbol_info_tick(sym)
+    info = mt5.symbol_info(sym)
+    if tick is None or info is None:
+        logging.error("[%s] XAUUSD parallel: missing tick/info.", sym)
+        return False
+
+    term = mt5.terminal_info()
+    if term is not None and hasattr(term, "trade_allowed") and not bool(getattr(term, "trade_allowed", True)):
+        logging.error("[%s] XAUUSD parallel: terminal trade not allowed.", sym)
+        return False
+
+    lot = _clamp_volume(sym, float(getattr(cfg, "xauusd_parallel_lot", cfg.lot) or cfg.lot))
+    order_type = mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL
+    price = float(tick.ask if side == "BUY" else tick.bid)
+    digits = int(info.digits)
+    magic = int(getattr(cfg, "xauusd_parallel_magic", 0) or 0)
+
+    request: dict = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": sym,
+        "volume": lot,
+        "type": order_type,
+        "price": price,
+        "deviation": cfg.deviation_points,
+        "magic": magic,
+        "comment": "xauusd-parallel",
+        "type_time": mt5.ORDER_TIME_GTC,
+    }
+    filling_candidates = [
+        mt5.ORDER_FILLING_IOC,
+        mt5.ORDER_FILLING_FOK,
+        getattr(mt5, "ORDER_FILLING_RETURN", mt5.ORDER_FILLING_IOC),
+    ]
+
+    logging.info(
+        "[%s] XAUUSD parallel opening %s | lot=%.2f | price=%.*f | spread=%.1f pts | no SL/TP",
+        sym,
+        side,
+        lot,
+        digits,
+        price,
+        spread if spread is not None else 0.0,
+    )
+    result = _order_send_deal_try_fillings(sym, request, filling_candidates)
+    if result is None:
+        logging.error("[%s] XAUUSD parallel: order_send returned None. last_error=%s", sym, mt5.last_error())
+        return False
+    if int(getattr(result, "retcode", -1)) != int(mt5.TRADE_RETCODE_DONE):
+        logging.error(
+            "[%s] XAUUSD parallel order failed. retcode=%s | comment=%s",
+            sym,
+            getattr(result, "retcode", "n/a"),
+            getattr(result, "comment", ""),
+        )
+        return False
+
+    _last_trade_time[sym] = datetime.now()
+    _record_symbol_open_timestamp(sym)
+    _log_event(
+        {
+            "event": "XAUUSD_PARALLEL_OPEN",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "symbol": sym,
+            "side": side,
+            "lot": lot,
+            "price": price,
+            "spread_points": float(spread) if spread is not None else None,
+            "tp_money": float(getattr(cfg, "xauusd_parallel_tp_money", 0.15) or 0.15),
+            "magic": magic,
+            "trend_rule": "h4_last_close_vs_prev",
+        }
+    )
+    return True
+
+
+def run_xauusd_parallel_cycle(cfg: Config) -> None:
+    if not bool(cfg.xauusd_parallel_enabled):
+        return
+
+    sym = _xauusd_parallel_symbol(cfg)
+    max_pos = max(1, int(getattr(cfg, "xauusd_parallel_max_positions", 1) or 1))
+    if len(_xauusd_parallel_positions(cfg)) >= max_pos:
+        return
+
+    trend = _xauusd_simple_market_trend(sym)
+    if trend == "UP":
+        side: Signal = "BUY"
+    elif trend == "DOWN":
+        side = "SELL"
+    else:
+        logging.debug("[%s] XAUUSD parallel: trend FLAT, no new entry.", sym)
+        return
+
+    logging.info("[%s] XAUUSD parallel signal: trend=%s → %s", sym, trend, side)
+    _log_event(
+        {
+            "event": "XAUUSD_PARALLEL_SIGNAL",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "symbol": sym,
+            "trend_h4_simple": trend,
+            "decision": side,
+        }
+    )
+    open_xauusd_parallel_trade(cfg, side)
+
+
+def _load_dotenv() -> None:
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(override=False)
+    except ImportError:
+        pass
+
+
+def _sleep_until_next_poll(cfg: Config, loop_started_monotonic: float) -> None:
+    poll = max(1.0, float(cfg.poll_seconds))
+    manage_iv = max(1.0, float(cfg.manage_positions_interval_seconds))
+    elapsed = time.monotonic() - loop_started_monotonic
+    remaining = max(0.0, poll - elapsed)
+    if remaining <= 0:
+        return
+    if manage_iv >= remaining:
+        time.sleep(remaining)
+        return
+    while remaining > 1e-6:
+        sleep_chunk = min(manage_iv, remaining)
+        time.sleep(sleep_chunk)
+        remaining -= sleep_chunk
+        if remaining > 1e-6:
+            manage_positions(cfg)
+            if cfg.xauusd_parallel_enabled:
+                manage_xauusd_parallel_positions(cfg)

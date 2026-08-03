@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py analyze_report.py)",
+      "Bash(py analyze_losers_context.py)",
+      "WebSearch",
+      "Bash(py -c ' *)",
+      "Bash(py -c \"import ast; ast.parse\\(open\\('bot_mt5.py', encoding='utf-8'\\).read\\(\\)\\); print\\('bot_mt5.py: syntax OK'\\)\")",
+      "Bash(py analyze_stocks_volatility.py)",
+      "Bash(python -c ' *)",
+      "Bash(python)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Select-String -Path 'C:\\\\Users\\\\juani\\\\Projects\\\\meta-trader\\\\bot_mt5.py' -Pattern 'Managing positions only' -SimpleMatch | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line\\)\" })",
+      "PowerShell(Select-String -Path 'C:\\\\Users\\\\juani\\\\Projects\\\\meta-trader\\\\bot_mt5.py' -Pattern 'No symbols allowed' -SimpleMatch | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\).Substring\\(0, [Math]::Min\\(200,$_.Line.Trim\\(\\).Length\\)\\)\\)\" })",
+      "PowerShell(Select-String -Path 'C:\\\\Users\\\\juani\\\\Projects\\\\meta-trader\\\\bot_mt5.py' -Pattern 'allowed for new' -SimpleMatch | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\).Substring\\(0, [Math]::Min\\(220,$_.Line.Trim\\(\\).Length\\)\\)\\)\" })",
+      "PowerShell(\"hello world\")"
+    ]
+  }
+}

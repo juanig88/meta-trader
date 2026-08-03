@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="15" />
+    <title>Portfolio backtest - MT5 Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>Portfolio backtest</h1>
+        <div class="muted">Última actualización: {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto refresh 15s)</div>
+        <div class="muted" style="margin-top:6px;">
+          <a href="/">← Dashboard</a>
+          &nbsp;|&nbsp;
+          <a href="/reports">Reportes JSONL</a>
+        </div>
+      </div>
+      <div class="pill mono">{{ filename }}</div>
+    </div>
+
+    {% if not file_exists %}
+    <div class="card warn">
+      <strong>No existe</strong> <span class="mono">{{ filename }}</span>.
+      Ejemplo:
+      <div class="mono" style="margin-top:10px;">py .\portfolio_backtest.py --symbols GBPUSD,USDJPY,NZDJPY --weights GBPUSD=0.4,USDJPY=0.4,NZDJPY=0.2 --days 365 --sl 80 --tp 160 --risk-pct 2</div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>Corridas (más recientes primero)</h2>
+      <div style="overflow:auto; margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th class="mono">ts</th>
+              <th class="mono">symbols</th>
+              <th class="mono">weights</th>
+              <th class="mono">risk%</th>
+              <th class="mono">initial</th>
+              <th class="mono">final</th>
+              <th class="mono">pnl $</th>
+              <th class="mono">max DD $</th>
+              <th class="mono">trades</th>
+              <th class="mono">SL/TP</th>
+              <th class="mono">rebal</th>
+              <th class="mono">range</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if rows %}
+              {% for r in rows %}
+                {% set syms = r.get("symbols") or [] %}
+                <tr>
+                  <td class="mono">{{ r.get("ts", "") }}</td>
+                  <td class="mono">{{ syms | join(",") }}</td>
+                  <td class="mono" style="max-width:220px;white-space:normal;word-break:break-all;">{{ r.get("weights", {}) | tojson }}</td>
+                  <td class="mono">{{ r.get("risk_pct", "") }}</td>
+                  <td class="mono">{{ "%.2f"|format(r.get("initial_balance", 0)|float) }}</td>
+                  <td class="mono">{{ "%.2f"|format(r.get("final_balance", 0)|float) }}</td>
+                  <td class="mono {{ 'good' if (r.get('pnl_money', 0)|float) >= 0 else 'bad' }}">{{ "%.2f"|format(r.get("pnl_money", 0)|float) }}</td>
+                  <td class="mono bad">{{ "%.2f"|format(r.get("max_drawdown_money", 0)|float) }}</td>
+                  <td class="mono">{{ r.get("trades_total", "") }}</td>
+                  <td class="mono">{{ r.get("sl_points", "") }} / {{ r.get("tp_points", "") }}</td>
+                  <td class="mono">{{ r.get("rebalance_days", "") }}</td>
+                  <td class="mono" style="max-width:180px;white-space:normal;">{{ r.get("start", "") }} → {{ r.get("end", "") }}</td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr><td colspan="12" class="muted">Sin filas parseables.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

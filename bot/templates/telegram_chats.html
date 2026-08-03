@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Telegram — chat ids</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>Telegram: posibles chat_id</h1>
+        <div class="muted">Solo lectura (getUpdates) · {{ now.strftime("%Y-%m-%d %H:%M:%S") }}</div>
+        <div class="muted" style="margin-top:8px;"><a href="{{ url_for('index') }}">← Volver al dashboard</a></div>
+      </div>
+    </div>
+
+    {% if not ok %}
+    <div class="card warn">
+      <strong>No se pudo consultar Telegram.</strong>
+      <span class="mono" style="display:block;margin-top:8px;white-space:pre-wrap;">{{ err }}</span>
+      <p class="muted" style="margin-top:10px;margin-bottom:0;">
+        Si ves error de <strong>webhook</strong>, desactivá el webhook del bot o usá @userinfobot para tu id numérico (en chat privado suele coincidir con <span class="mono">TELEGRAM_CHAT_ID</span>).
+      </p>
+    </div>
+    {% elif not chats %}
+    <div class="card warn">
+      <strong>No hay mensajes recientes para este bot.</strong>
+      <ol class="muted" style="margin:10px 0 0 1.2rem;">
+        <li>En Telegram, abrí tu bot y enviá <span class="mono">/start</span> o cualquier texto.</li>
+        <li>Recargá esta página o ejecutá <span class="mono">py .\get_telegram_chat_id.py</span> en la carpeta del repo.</li>
+      </ol>
+      <p class="muted" style="margin-bottom:0;">
+        Alternativa: escribile a <strong>@userinfobot</strong> en privado; el número que te muestra suele ser el <span class="mono">TELEGRAM_CHAT_ID</span> si las alertas van a ese mismo chat con tu bot.
+      </p>
+    </div>
+    {% else %}
+    <div class="card">
+      <p class="muted" style="margin-top:0;">
+        Copiá el valor de <strong>chat_id</strong> a <span class="mono">TELEGRAM_CHAT_ID</span> en <span class="mono">.env</span> y reiniciá el bot / Flask.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>chat_id (para .env)</th>
+            <th>Tipo</th>
+            <th>Nombre / título</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in chats %}
+          <tr>
+            <td class="mono">{{ c.chat_id }}</td>
+            <td>{{ c.type }}</td>
+            <td>{{ c.label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </body>
+</html>
