@@ -22,10 +22,10 @@ Proyecto en Python para **trading automatizado en MetaTrader 5** (librería `Met
   - Lee `.env`, conecta MT5, decide señales por símbolo y abre trades con SL/TP.
   - Escribe `bot_state.json` (para el dashboard) y logs estructurados (`trades.log`: texto + líneas JSON con eventos `SIGNAL`, `TRADE_OPEN`, etc.).
   - Soporta **risk sizing** y **modo portfolio (pesos)** para distribuir riesgo total.
-  - Opcional: **`market_regime.py`** detecta régimen por símbolo (tendencia / lateral / incierto), actualiza **`market_regimes`** en `bot_state.json` y puede avisar por **Telegram** con JSON sugerido para pegar en `BOT_SYMBOL_CONFIG` (sin aplicar cambios solo: reiniciás el bot cuando copies el config).
+  - Opcional: **`market_regime.py`** detecta régimen por símbolo (tendencia / lateral / incierto), actualiza **`market_regimes`** en `bot_state.json` y puede avisar por **Telegram**. Es **telemetría**: no cambia filtros solo (`BOT_MARKET_REGIME_AUTO_APPLY=0` por defecto). La fuente de verdad sigue siendo `BOT_SYMBOL_CONFIG` en `.env`.
 
 - **`market_regime.py`**
-  - Módulo aparte usado solo por el bot live (no cambia SL/TP ni escalera USD por sí mismo).
+  - Módulo aparte usado por el bot live. Clasifica régimen y notifica; no muta SL/TP ni escalera USD salvo auto-apply explícito (desaconsejado).
   - Umbrales y lecturas: ADX M15 + ADX H4 + alineación EMA50/200 en M15 + distancia al centro del rango en velas **H1**.
 
 - **`indicators.py`**

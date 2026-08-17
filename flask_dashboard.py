@@ -33,6 +33,147 @@ FORWARD_RESULTS_PATH = Path("forward_results.jsonl")
 ROOT = Path(__file__).resolve().parent
 FORWARD_SCRIPT = ROOT / "forward_metrics.py"
 TRADES_LOG_PATH = ROOT / "trades.log"
+_EVAL_EVENT_NAMES = frozenset(
+    {
+        "EVAL_CYCLE",
+        "EVAL_SKIP",
+        "EVAL_ENTRY_ATTEMPT",
+        "EVAL_TRACKS_BOOT",
+        "XAUUSD_PARALLEL_SKIP",
+        "XAUUSD_PARALLEL_SIGNAL",
+        "XAUUSD_PARALLEL_OPEN",
+        "XAUUSD_PARALLEL_CLOSE",
+        "XAUUSD_PARALLEL_BROKER_CLOSE",
+    }
+)
+
+
+def parse_recent_eval_events(
+    path: Path | None = None,
+    *,
+    limit: int = 40,
+    max_bytes: int = 400_000,
+) -> list[dict]:
+    """
+    Tail-parse trades.log for EVAL_* / XAUUSD_PARALLEL_* JSON lines (newest last).
+    Pure-ish helper (filesystem only) for dashboard + tests.
+    """
+    log_path = path or TRADES_LOG_PATH
+    if not log_path.is_file():
+        return []
+    try:
+        size = log_path.stat().st_size
+        with log_path.open("rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+                f.readline()  # discard partial first line
+            raw = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return []
+
+    out: list[dict] = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        # logging format: "2026-.. | INFO | {json}"
+        if " | " in s:
+            s = s.split(" | ", 2)[-1].strip()
+        if not (s.startswith("{") and s.endswith("}")):
+            continue
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        ev = str(obj.get("event") or "")
+        if ev not in _EVAL_EVENT_NAMES:
+            continue
+        out.append(obj)
+    if limit > 0 and len(out) > limit:
+        out = out[-limit:]
+    return out
+
+
+def _tracks_from_env_fallback() -> list[dict]:
+    """Si el bot aún no escribió eval_tracks, armar filas desde .env."""
+    tracks: list[dict] = []
+    if (os.getenv("BOT_XAUUSD_PARALLEL_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+        sessions = (os.getenv("BOT_XAUUSD_PARALLEL_SESSIONS") or "").strip()
+        if sessions:
+            window = sessions.replace(",", " · ")
+        else:
+            start_h = int(float(os.getenv("BOT_XAUUSD_PARALLEL_START_HOUR", "10")))
+            end_h = int(float(os.getenv("BOT_XAUUSD_PARALLEL_END_HOUR", "14")))
+            window = f"{start_h:02d}:00-{end_h:02d}:00"
+        tracks.append(
+            {
+                "track": "xau_parallel_scalp",
+                "symbol": (os.getenv("BOT_XAUUSD_PARALLEL_SYMBOL") or "XAUUSD").strip().upper(),
+                "path": "parallel",
+                "window": window,
+                "window_tz": "LOCAL",
+                "lot": float(os.getenv("BOT_XAUUSD_PARALLEL_LOT", "0.01")),
+                "sl_mode": (os.getenv("BOT_XAUUSD_PARALLEL_SL_MODE") or "atr").strip().lower(),
+                "sl_atr_mult": float(os.getenv("BOT_XAUUSD_PARALLEL_SL_ATR_MULT", "1.5")),
+                "tp_rr": float(os.getenv("BOT_XAUUSD_PARALLEL_TP_RR", "2.0")),
+                "adx_min": float(os.getenv("BOT_XAUUSD_PARALLEL_ADX_MIN", "22")),
+                "in_window": None,
+                "source": "env",
+            }
+        )
+    raw_syms = (os.getenv("BOT_SYMBOLS") or "").strip()
+    symbols = [p.strip() for p in raw_syms.split(",") if p.strip()]
+    try:
+        cfg_map = json.loads(os.getenv("BOT_SYMBOL_CONFIG") or "{}")
+    except json.JSONDecodeError:
+        cfg_map = {}
+    if not isinstance(cfg_map, dict):
+        cfg_map = {}
+    for sym in symbols:
+        d = cfg_map.get(sym) if isinstance(cfg_map.get(sym), dict) else {}
+        tracks.append(
+            {
+                "track": str(d.get("eval_track") or "main_loop"),
+                "symbol": sym,
+                "path": "main_loop",
+                "window": str(d.get("trading_window_sessions") or "(global/24x5)"),
+                "window_tz": os.getenv("BOT_TRADING_WINDOW_TIMEZONE") or "LOCAL",
+                "lot": float(d.get("lot") or os.getenv("BOT_LOT") or 0.01),
+                "sl_atr_mult": float(d.get("sl_atr_mult") or 0),
+                "tp_atr_mult": float(d.get("tp_atr_mult") or 0),
+                "adx_min": float(d.get("adx_min") or 0),
+                "in_window": None,
+                "source": "env",
+            }
+        )
+    return tracks
+
+
+def build_parallel_tracks_view(state: dict) -> dict:
+    """Vista unificada tracks + últimos eventos EVAL para la home del dashboard."""
+    et = state.get("eval_tracks") if isinstance(state.get("eval_tracks"), dict) else {}
+    tracks = list(et.get("tracks") or [])
+    if not tracks:
+        tracks = _tracks_from_env_fallback()
+    recent = parse_recent_eval_events(limit=50)
+    return {
+        "tracks": tracks,
+        "meta": {
+            "ts": et.get("ts"),
+            "crypto_sell_requires_h4_down": et.get(
+                "crypto_sell_requires_h4_down",
+                (os.getenv("BOT_CRYPTO_SELL_REQUIRES_H4_DOWN") or "1").strip() not in ("0", "false", "no"),
+            ),
+            "daily_loss_limit": et.get("daily_loss_limit", os.getenv("BOT_DAILY_LOSS_LIMIT")),
+            "max_open_trades_total": et.get(
+                "max_open_trades_total", os.getenv("BOT_MAX_OPEN_TRADES_TOTAL")
+            ),
+            "from_bot_state": bool(et.get("tracks")),
+        },
+        "recent_events": list(reversed(recent)),  # newest first in UI
+    }
 
 try:
     import analyze_trades  # local module, same directory
@@ -202,24 +343,25 @@ def _market_regime_export_text(state: dict) -> str:
 
     lines += [
         "",
-        "Instrucciones: merge profundo — para cada símbolo, actualizar en .env la clave "
-        "BOT_SYMBOL_CONFIG (JSON una línea) el objeto de ese símbolo con las claves de abajo. "
-        "No borrar sl_points, tp_points, ema_*, max_spread_points, etc. Luego reiniciar el bot.",
+        "Nota: régimen = telemetría. Los filtros NO se mutan en caliente "
+        "(BOT_MARKET_REGIME_AUTO_APPLY=0 por defecto). "
+        "Lo de abajo es referencia opcional si decidís editar BOT_SYMBOL_CONFIG a mano; "
+        "no borres sl_points/tp_points/ema_*/spreads. Reinicio solo si vos cambiaste .env.",
         "",
     ]
 
     if not patches:
         lines.append(
             "(No hay suggested_config_patch en este bot_state: reiniciá el bot con la versión actual "
-            "de market_regime.py para rellenar parches.)"
+            "de market_regime.py para rellenar la referencia.)"
         )
         lines.append("--- fin ---")
         return "\n".join(lines)
 
-    lines.append("PATCHES (JSON indentado, legible):")
+    lines.append("REFERENCIA opcional (JSON indentado; NO auto-aplicada):")
     lines.append(json.dumps(patches, indent=2, ensure_ascii=False))
     lines.append("")
-    lines.append("PATCHES (una línea, objeto completo — útil para pegar en chat y que mergeen BOT_SYMBOL_CONFIG):")
+    lines.append("REFERENCIA (una línea; solo si editás .env a propósito):")
     lines.append(json.dumps(patches, separators=(",", ":"), ensure_ascii=False))
     lines.append("")
     lines.append("--- fin ---")
@@ -230,6 +372,35 @@ def _market_regime_export_text(state: dict) -> str:
 def index():
     state = get_bot_state()
     health = compute_health(state)
+
+    # Extraemos la data de XAUUSD Paralelo si existe
+    xauusd_state = state.get("xauusd_parallel", {}) or {}
+    parallel_view = build_parallel_tracks_view(state)
+
+    # Last-trade table: símbolos del bot + XAUUSD paralelo + cualquier key en last_trade_time
+    last_trade_time = state.get("last_trade_time") or {}
+    last_trade_symbols: list[str] = []
+    seen: set[str] = set()
+    for sym in list(state.get("symbols") or []):
+        s = str(sym or "").strip()
+        if s and s not in seen:
+            last_trade_symbols.append(s)
+            seen.add(s)
+    xau_sym = str(xauusd_state.get("symbol") or "").strip() if xauusd_state.get("enabled") else ""
+    if xau_sym and xau_sym not in seen:
+        last_trade_symbols.append(xau_sym)
+        seen.add(xau_sym)
+    for t in parallel_view.get("tracks") or []:
+        s = str((t or {}).get("symbol") or "").strip()
+        if s and s not in seen:
+            last_trade_symbols.append(s)
+            seen.add(s)
+    for sym in sorted(last_trade_time.keys()):
+        s = str(sym or "").strip()
+        if s and s not in seen:
+            last_trade_symbols.append(s)
+            seen.add(s)
+
     return render_template(
         "index.html",
         state=state,
@@ -242,6 +413,9 @@ def index():
         telegram_test=request.args.get("telegram_test", ""),
         telegram_test_msg=request.args.get("telegram_test_msg", ""),
         regime_export_text=_market_regime_export_text(state),
+        xauusd_state=xauusd_state,
+        last_trade_symbols=last_trade_symbols,
+        parallel_view=parallel_view,
     )
 
 
@@ -645,6 +819,28 @@ def _fetch_positions_snapshot() -> dict:
 
     state = get_bot_state()
     symbols_filter = [str(s).upper() for s in (state.get("symbols") or [])]
+    xau_st = state.get("xauusd_parallel") or {}
+    if isinstance(xau_st, dict) and xau_st.get("enabled"):
+        xau_sym = str(xau_st.get("symbol") or "XAUUSD").strip().upper()
+        if xau_sym and xau_sym not in symbols_filter:
+            symbols_filter.append(xau_sym)
+    # Magics gestionados: loop + scalper XAU
+    managed_magics: set[int] = set()
+    try:
+        env_magic = os.getenv("BOT_MAGIC")
+        if env_magic:
+            managed_magics.add(int(float(env_magic)))
+    except (TypeError, ValueError):
+        pass
+    try:
+        if xau_st.get("enabled") and xau_st.get("magic") is not None:
+            managed_magics.add(int(float(xau_st.get("magic"))))
+        else:
+            xm = os.getenv("BOT_XAUUSD_PARALLEL_MAGIC")
+            if xm:
+                managed_magics.add(int(float(xm)))
+    except (TypeError, ValueError):
+        pass
 
     acc = mt5.account_info()
     account = None
@@ -685,14 +881,6 @@ def _fetch_positions_snapshot() -> dict:
             "margin_status": margin_status,
         }
 
-    bot_magic = None
-    try:
-        env_magic = os.getenv("BOT_MAGIC")
-        if env_magic:
-            bot_magic = int(float(env_magic))
-    except (TypeError, ValueError):
-        bot_magic = None
-
     rows: list[dict] = []
     positions = mt5.positions_get() or []
     for p in positions:
@@ -709,7 +897,7 @@ def _fetch_positions_snapshot() -> dict:
             magic = int(getattr(p, "magic", 0) or 0)
         except (TypeError, ValueError):
             magic = 0
-        managed = bot_magic is not None and (magic == bot_magic or magic == 0)
+        managed = (magic in managed_magics) or (magic == 0 and bool(managed_magics))
         rows.append(
             {
                 "ticket": int(getattr(p, "ticket", 0) or 0),

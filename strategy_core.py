@@ -241,7 +241,8 @@ def decide(params: StrategyParams, features: Features, *, symbol: Optional[str] 
     if params.allow_flat_h4:
         slope = features.price_slope_m15
         if features.signal_m15 == "BUY" and features.ema_dir == "UP" and features.trend_h4 != "DOWN":
-            if slope == "DOWN" and params.price_slope_filter_enabled:
+            # Strict: exigir pendiente a favor (FLAT/DOWN = entrada tardía / contra-rebote).
+            if params.price_slope_filter_enabled and slope != "UP":
                 return "NONE"
             return "BUY"
         if features.signal_m15 == "SELL" and features.ema_dir == "DOWN":
@@ -250,7 +251,9 @@ def decide(params: StrategyParams, features: Features, *, symbol: Optional[str] 
             if params.crypto_sell_requires_h4_down and symbol and symbol_uses_crypto_relaxed_m15(symbol):
                 if features.trend_h4 != "DOWN":
                     return "NONE"
-            if slope == "UP" and params.price_slope_filter_enabled:
+            # Strict: SELL solo con slope DOWN. FLAT tras un bounce UP era el caso
+            # BTC 2026-08-10 16:15 (H4 DOWN + signal SELL pero microtendencia ya no bajista).
+            if params.price_slope_filter_enabled and slope != "DOWN":
                 return "NONE"
             return "SELL"
         return "NONE"

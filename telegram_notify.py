@@ -8,6 +8,7 @@ Configuración en `.env`:
   TELEGRAM_NOTIFY_STOP=1    # opcional: avisar al detenerse (default 1)
   TELEGRAM_NOTIFY_TRADE_OPEN=1   # avisar al ejecutar una orden (entrada)
   TELEGRAM_NOTIFY_TRADE_CLOSE=1  # avisar al cerrar posición (SL/TP/manual, etc.)
+  TELEGRAM_NOTIFY_SESSION_WINDOW=1  # aviso al abrir/cerrar ventana horaria por instrumento
 
 Si faltan token o chat_id, todas las llamadas son no-op.
 """

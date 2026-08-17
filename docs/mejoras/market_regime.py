@@ -2,13 +2,15 @@
 Detector de régimen de mercado por símbolo para bot_mt5.py.
 
 TRENDING / RANGING / UNCERTAIN (ADX M15, ADX H4, EMA M15, posición en rango H1).
-Si cambia el régimen, avisa por Telegram con JSON sugerido para BOT_SYMBOL_CONFIG.
+Si cambia el régimen, avisa por Telegram (telemetría). Los filtros del bot no se
+mutan solos salvo BOT_MARKET_REGIME_AUTO_APPLY=1 (desaconsejado; default off).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,18 +25,19 @@ RegimeLabel = str
 _CRYPTO = {"BTCUSD", "ETHUSD"}
 _METALS = {"XAUUSD"}
 
-# Texto corto para Telegram / dashboard (qué implica el régimen).
+# Texto corto para Telegram / dashboard (qué implica el régimen) — solo contexto, no orden de cambio.
 _REGIME_HINT_ES: dict[str, str] = {
     "TRENDING": (
-        "Mercado con ADX alto y confirmación: conviene permitir más trades a favor "
-        "(adx_min algo más bajo, rango H1 menos restrictivo, menos cooldown, dejar correr profit en filter-exit)."
+        "Lectura: ADX alto con confirmación (tendencia más probable). "
+        "Útil como contexto; no implica cambiar filtros del bot automáticamente."
     ),
     "RANGING": (
-        "Mercado más plano / precio cerca del medio del rango H1: endurecer entradas "
-        "(adx_min más alto, range_filter más estricto, cooldown más largo, opcional tope en escalera USD)."
+        "Lectura: mercado más plano / precio cerca del medio del rango H1. "
+        "Útil como contexto; no implica endurecer filtros automáticamente."
     ),
     "UNCERTAIN": (
-        "Señales mixtas: perfil intermedio/conservador hasta que se defina tendencia o lateral claro."
+        "Lectura: señales mixtas (ni tendencia ni lateral claros). "
+        "Mantener el perfil de BOT_SYMBOL_CONFIG hasta decisión manual."
     ),
 }
 
@@ -206,6 +209,11 @@ class MarketRegimeDetector:
 
         self._states: dict[str, RegimeState] = {}
         self._last_check: dict[str, float] = {}
+        self._regime_first_seen: dict[str, tuple[str, float]] = {}
+        self._regime_pending_from_label: dict[str, str] = {}
+        self.min_hold_seconds: float = float(
+            os.environ.get("BOT_REGIME_MIN_HOLD_SECONDS", "3600")
+        )
         # Parches para aplicación automática en bot_mt5 (consumir con take_pending_auto_patches).
         self._pending_auto_patches: list[tuple[str, str, str, dict]] = []
 
@@ -248,10 +256,38 @@ class MarketRegimeDetector:
         self._states[symbol] = new_state
 
         if prev_label is not None and new_state.label != prev_label:
+            seen = self._regime_first_seen.get(symbol)
+            now_ts = time.time()
+
+            if seen is None or seen[0] != new_state.label:
+                self._regime_first_seen[symbol] = (new_state.label, now_ts)
+                self._regime_pending_from_label[symbol] = prev_label
+                logging.info(
+                    "[MarketRegime] %s: detectado %s (antes %s) — esperando %.0f min antes de aplicar.",
+                    symbol,
+                    new_state.label,
+                    prev_label,
+                    self.min_hold_seconds / 60,
+                )
+                return new_state.label
+
+            elapsed = now_ts - seen[1]
+            if elapsed < self.min_hold_seconds:
+                logging.info(
+                    "[MarketRegime] %s: %s sostenido %.1f min de %.0f requeridos — aún no aplicar.",
+                    symbol,
+                    new_state.label,
+                    elapsed / 60,
+                    self.min_hold_seconds / 60,
+                )
+                return new_state.label
+
+            self._regime_first_seen.pop(symbol, None)
+            from_label = self._regime_pending_from_label.pop(symbol, prev_label)
             logging.info(
                 "[MarketRegime] %s: %s → %s (ADX_M15=%.1f ADX_H4=%.1f ema_aligned=%s dist_mid=%.2f)",
                 symbol,
-                prev_label,
+                from_label,
                 new_state.label,
                 new_state.adx or 0.0,
                 new_state.adx_h4 or 0.0,
@@ -259,8 +295,42 @@ class MarketRegimeDetector:
                 new_state.dist_mid_frac or 0.0,
             )
             patch = _suggested_params(symbol, new_state.label)
-            self._pending_auto_patches.append((symbol, prev_label, new_state.label, patch))
-            self._notify_change(symbol, prev_label, new_state)
+            self._pending_auto_patches.append((symbol, from_label, new_state.label, patch))
+            self._notify_change(symbol, from_label, new_state)
+        else:
+            seen = self._regime_first_seen.get(symbol)
+            now_ts = time.time()
+            if (
+                seen is not None
+                and prev_label is not None
+                and seen[0] == new_state.label
+                and new_state.label == prev_label
+            ):
+                elapsed = now_ts - seen[1]
+                if elapsed < self.min_hold_seconds:
+                    logging.info(
+                        "[MarketRegime] %s: %s sostenido %.1f min de %.0f requeridos — aún no aplicar.",
+                        symbol,
+                        new_state.label,
+                        elapsed / 60,
+                        self.min_hold_seconds / 60,
+                    )
+                else:
+                    self._regime_first_seen.pop(symbol, None)
+                    from_label = self._regime_pending_from_label.pop(symbol, prev_label)
+                    logging.info(
+                        "[MarketRegime] %s: %s → %s (ADX_M15=%.1f ADX_H4=%.1f ema_aligned=%s dist_mid=%.2f)",
+                        symbol,
+                        from_label,
+                        new_state.label,
+                        new_state.adx or 0.0,
+                        new_state.adx_h4 or 0.0,
+                        new_state.ema_aligned,
+                        new_state.dist_mid_frac or 0.0,
+                    )
+                    patch = _suggested_params(symbol, new_state.label)
+                    self._pending_auto_patches.append((symbol, from_label, new_state.label, patch))
+                    self._notify_change(symbol, from_label, new_state)
 
         return new_state.label
 
@@ -385,10 +455,9 @@ class MarketRegimeDetector:
             "",
             _REGIME_HINT_ES.get(st.label, ""),
             "",
-            "Qué ajustar:",
-            "Mergeá SOLO estas claves dentro del objeto de ESE símbolo en BOT_SYMBOL_CONFIG",
-            "(una línea JSON en .env). El resto (EMA, SL/TP points, spreads, ladder initial, etc.) dejalo como está.",
-            "Después reiniciás el bot.",
+            "Modo: telemetría (los parámetros del bot NO se actualizan en caliente).",
+            "Fuente de verdad: BOT_SYMBOL_CONFIG en .env. Auto-apply off por defecto",
+            "(BOT_MARKET_REGIME_AUTO_APPLY=0). Solo tocá filtros a mano si lo decidís vos.",
             "",
             "Métricas:",
         ]
@@ -402,13 +471,13 @@ class MarketRegimeDetector:
             lines.append(f"  Dist. centro rango: {st.dist_mid_frac:.2f}")
         lines += [
             "",
-            "Valores sugeridos (solo estas claves):",
+            "Referencia opcional (NO aplicar solo; checklist si algún día tunés a mano):",
             params_lines,
             "",
-            "Para qué sirve cada una:",
+            "Qué significa cada clave:",
             "\n".join(legend_lines) if legend_lines else "  (sin leyenda adicional)",
             "",
-            "JSON de una línea para pegar dentro de BOT_SYMBOL_CONFIG → " + symbol + ":",
+            "JSON referencia (solo si editás .env a propósito):",
             params_json,
         ]
         final_msg = "\n".join(lines)

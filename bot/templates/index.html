@@ -137,6 +137,233 @@
         </div>
       </div>
 
+      {% set pv = parallel_view or {} %}
+      {% set tracks = pv.get('tracks') or [] %}
+      {% if tracks %}
+      <div class="card" style="grid-column: 1 / -1;">
+        <h2>Parallel tracks (XAU + FX + BTC)</h2>
+        <p class="muted" style="margin-top:0;">
+          {% set meta = pv.get('meta') or {} %}
+          Fuente: {% if meta.get('from_bot_state') %}<span class="good">bot_state.eval_tracks</span>{% else %}<span class="bad">.env fallback</span> (reiniciá el bot){% endif %}
+          · daily kill {{ meta.get('daily_loss_limit', '—') }}
+          · max open {{ meta.get('max_open_trades_total', '—') }}
+          · BTC SELL needs H4 DOWN={{ meta.get('crypto_sell_requires_h4_down') }}
+          · insight MQL5: RR≥1.5 · no grid · multi-instrumento
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Track</th>
+              <th>Símbolo</th>
+              <th>Path</th>
+              <th>Ventana</th>
+              <th>En ventana</th>
+              <th>Lot</th>
+              <th>SL/TP</th>
+              <th>Decisión</th>
+              <th>Último skip</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in tracks %}
+              {% set cyc = t.get('last_cycle') or {} %}
+              {% set sk = t.get('last_skip') or {} %}
+              <tr>
+                <td class="mono">{{ t.get('track', '—') }}</td>
+                <td class="mono">{{ t.get('symbol', '—') }}</td>
+                <td class="mono">{{ t.get('path', '—') }}</td>
+                <td class="mono" style="font-size:12px;">{{ t.get('window', '—') }} <span class="muted">{{ t.get('window_tz', '') }}</span></td>
+                <td>
+                  {% if t.get('in_window') is sameas true %}<span class="good">sí</span>
+                  {% elif t.get('in_window') is sameas false %}<span class="bad">no</span>
+                  {% else %}<span class="muted">?</span>{% endif %}
+                </td>
+                <td class="mono">{{ t.get('lot', '—') }}</td>
+                <td class="mono" style="font-size:12px;">
+                  {% if t.get('sl_mode') == 'atr' or t.get('sl_atr_mult') %}
+                    ATR×{{ t.get('sl_atr_mult', t.get('sl_atr_mult')) }}{% if t.get('tp_rr') %} / RR{{ t.get('tp_rr') }}{% elif t.get('tp_atr_mult') %} / TP×{{ t.get('tp_atr_mult') }}{% endif %}
+                  {% else %}—{% endif %}
+                </td>
+                <td class="mono">
+                  {% set dec = t.get('decision') or cyc.get('decision') or (t.get('last_signal') or {}).get('decision') %}
+                  {% if dec in ('BUY','SELL') %}<span class="good">{{ dec }}</span>
+                  {% elif dec %}<span class="muted">{{ dec }}</span>
+                  {% else %}—{% endif %}
+                  {% if cyc.get('adx') is not none %}<span class="muted"> · ADX {{ cyc.get('adx') }}</span>{% endif %}
+                  {% if cyc.get('trend_h4') %}<span class="muted"> · H4 {{ cyc.get('trend_h4') }}</span>{% endif %}
+                </td>
+                <td class="mono" style="font-size:12px;">
+                  {% if sk %}{{ sk.get('reason') }} · {{ sk.get('ts', '') }}{% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% set recent = pv.get('recent_events') or [] %}
+        {% if recent %}
+        <p class="muted" style="margin:14px 0 6px;">Últimos eventos EVAL / XAU parallel (trades.log)</p>
+        <table>
+          <thead>
+            <tr>
+              <th>ts</th>
+              <th>event</th>
+              <th>symbol</th>
+              <th>detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ev in recent[:25] %}
+              <tr>
+                <td class="mono" style="font-size:11px;">{{ ev.get('ts', '—') }}</td>
+                <td class="mono">{{ ev.get('event', '—') }}</td>
+                <td class="mono">{{ ev.get('symbol', '—') }}</td>
+                <td class="mono" style="font-size:11px;">
+                  {% if ev.get('decision') %}dec={{ ev.get('decision') }} {% endif %}
+                  {% if ev.get('reason') %}reason={{ ev.get('reason') }} {% endif %}
+                  {% if ev.get('side') %}side={{ ev.get('side') }} {% endif %}
+                  {% if ev.get('track') %}track={{ ev.get('track') }} {% endif %}
+                  {% if ev.get('trend_h4') %}H4={{ ev.get('trend_h4') }} {% endif %}
+                  {% if ev.get('adx') is not none %}ADX={{ ev.get('adx') }} {% endif %}
+                  {% if ev.get('spread') is not none %}spread={{ ev.get('spread') }}{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if xauusd_state.get('enabled') %}
+      <div class="card">
+        <h2>Scalper XAUUSD (M15 parallel)</h2>
+        {% set pos = xauusd_state.get('position') or {} %}
+        {% set session = xauusd_state.get('session') or {} %}
+        {% set last_sig = xauusd_state.get('last_signal') or {} %}
+        {% set last_skip = xauusd_state.get('last_skip') or {} %}
+        {% set skip_reasons = xauusd_state.get('skip_reasons') or {} %}
+        <div class="kv">
+          <div class="muted">Símbolo</div><div>{{ xauusd_state.get('symbol', 'XAUUSD') }}</div>
+          <div class="muted">Posición</div>
+          <div style="color:{% if (pos.get('count') or 0) > 0 %}#f59e0b{% else %}#94a3b8{% endif %}">
+            {% if (pos.get('count') or 0) > 0 %}
+              {{ pos.get('side') }} · ticket {{ pos.get('ticket') }} · float
+              <span class="{{ 'good' if (pos.get('float_pnl') or 0) >= 0 else 'bad' }}">${{ "%.2f"|format(pos.get('float_pnl') or 0) }}</span>
+            {% else %}
+              flat (0 / {{ xauusd_state.get('max_positions', 1) }})
+            {% endif %}
+          </div>
+          <div class="muted">Salidas</div>
+          <div style="color:#16a34a">
+            {% if (xauusd_state.get('sl_mode') or 'atr') == 'atr' %}
+              ATR×{{ xauusd_state.get('sl_atr_mult', 1.5) }} / RR {{ xauusd_state.get('tp_rr', 2.0) }}
+              <span class="muted">(money fallback ${{ xauusd_state.get('tp_money', 2) }}/${{ xauusd_state.get('sl_money', 2) }})</span>
+            {% else %}
+              Target/Stop ${{ xauusd_state.get('tp_money', 0.50) }} / ${{ xauusd_state.get('sl_money', 0.50) }}
+            {% endif %}
+          </div>
+          <div class="muted">ADX min / H1 filter</div>
+          <div class="mono">≥{{ xauusd_state.get('adx_min', 25) }} · H1={{ 'sí' if xauusd_state.get('h1_filter', true) else 'no' }} · H4={{ 'sí' if xauusd_state.get('h4_filter', true) else 'no' }}</div>
+          <div class="muted">Estado Horario</div>
+          {% set win_label = xauusd_state.get('window_label') or xauusd_state.get('sessions') or ((xauusd_state.get('start_hour', 10)|string) + '-' + (xauusd_state.get('end_hour', 14)|string) + 'hs') %}
+          {% if xauusd_state.get('in_window') is sameas true %}
+            <div style="color:#16a34a">Activo · {{ win_label }}</div>
+          {% elif xauusd_state.get('in_window') is sameas false %}
+            <div style="color:#dc2626">Fuera de horario · {{ win_label }}</div>
+          {% else %}
+            <div class="muted">{{ win_label }}</div>
+          {% endif %}
+          <div class="muted">Cooldownoldown</div>
+          <div class="mono">
+            {% set cd = xauusd_state.get('cooldown_remaining_sec', 0) %}
+            {% if cd and cd > 0 %}
+              {{ "%.0f"|format(cd) }}s restantes / {{ xauusd_state.get('cooldown_seconds', 300) }}s
+            {% else %}
+              listo ({{ xauusd_state.get('cooldown_seconds', 300) }}s entre entradas)
+            {% endif %}
+          </div>
+          <div class="muted">Última señal</div>
+          <div class="mono">
+            {% if last_sig %}
+              {{ last_sig.get('decision') }} · ADX {{ last_sig.get('adx') }} · {{ last_sig.get('ts', '—') }}
+            {% else %}—{% endif %}
+          </div>
+          <div class="muted">Último skip</div>
+          <div class="mono">
+            {% if last_skip %}
+              {{ last_skip.get('reason') }} · {{ last_skip.get('ts', '—') }}
+            {% else %}—{% endif %}
+          </div>
+        </div>
+        {% set hourly = xauusd_state.get('hourly') or {} %}
+        {% set totals = hourly.get('totals') or session %}
+        {% set win = hourly.get('window') or {} %}
+        <p class="muted" style="margin:12px 0 6px;">
+          Sesión proceso ({{ hourly.get('date', '—') }}) · ventana {{ win.get('start_hour', start_h) }}–{{ win.get('end_hour', end_h) }}hs
+          · 1 trade / vela M15={{ 'sí' if xauusd_state.get('one_trade_per_bar') else 'no' }}
+        </p>
+        <div class="kv" style="margin-bottom:8px;">
+          <div class="muted">Opens / Closes / Skips</div>
+          <div class="mono">{{ totals.get('opens', 0) }} / {{ totals.get('closes', 0) }} / {{ totals.get('skips', 0) }}</div>
+          <div class="muted">Señales (entradas intentadas)</div>
+          <div class="mono">{{ totals.get('signals', 0) }}</div>
+          <div class="muted">PnL cerrado (sesión)</div>
+          <div class="mono {{ 'good' if (totals.get('pnl') or 0) >= 0 else 'bad' }}">
+            ${{ "%.2f"|format(totals.get('pnl') or 0) }}
+          </div>
+          <div class="muted">Spread medio (opens)</div>
+          <div class="mono">
+            {% if totals.get('spread_avg') is not none %}{{ totals.get('spread_avg') }} pts{% else %}—{% endif %}
+          </div>
+          {% if (session.get('open_close_gap') or 0) > 2 %}
+          <div class="muted">Nota</div>
+          <div class="bad">Gap opens−closes={{ session.get('open_close_gap') }} (cierres broker aún sincronizando / reiniciar bot)</div>
+          {% endif %}
+        </div>
+        {% if skip_reasons %}
+        <p class="muted" style="margin:8px 0 4px;">Skips por motivo (conteo crudo)</p>
+        <div class="mono" style="font-size:12px;margin-bottom:8px;">
+          {% for reason, cnt in skip_reasons.items()|sort %}
+            {{ reason }}={{ cnt }}{% if not loop.last %} · {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% set rows = hourly.get('by_hour') or [] %}
+        {% if rows %}
+        <table>
+          <thead>
+            <tr>
+              <th>Hora</th>
+              <th>Open</th>
+              <th>Close</th>
+              <th>Skip</th>
+              <th>PnL</th>
+              <th>Spread</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr{% if r.get('in_window') %} style="background:rgba(22,163,74,0.08)"{% endif %}>
+                <td class="mono">{{ r.get('label', r.get('hour')) }}</td>
+                <td class="mono">{{ r.get('opens', 0) }}</td>
+                <td class="mono">{{ r.get('closes', 0) }}</td>
+                <td class="mono">{{ r.get('skips', 0) }}</td>
+                <td class="mono {{ 'good' if (r.get('pnl') or 0) >= 0 else 'bad' }}">
+                  ${{ "%.2f"|format(r.get('pnl') or 0) }}
+                </td>
+                <td class="mono">
+                  {% if r.get('spread_avg') is not none %}{{ r.get('spread_avg') }}{% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="muted" style="margin:0;">Sin actividad aún en esta sesión del bot.</p>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <div class="card">
         <h2>Last trade time</h2>
         <table>
@@ -147,12 +374,12 @@
             </tr>
           </thead>
           <tbody>
-            {% set symbols = state.get("symbols", []) %}
             {% set last_trade_time = state.get("last_trade_time", {}) %}
-            {% if symbols %}
-              {% for sym in symbols %}
+            {% set xau_sym = (xauusd_state or {}).get('symbol') if xauusd_state is defined else None %}
+            {% if last_trade_symbols %}
+              {% for sym in last_trade_symbols %}
                 <tr>
-                  <td class="mono">{{ sym }}</td>
+                  <td class="mono">{{ sym }}{% if xau_sym and sym == xau_sym %} <span class="muted">(scalper)</span>{% endif %}</td>
                   <td class="mono">{{ last_trade_time.get(sym, "—") }}</td>
                 </tr>
               {% endfor %}
@@ -205,10 +432,12 @@
         </table>
         {% if regimes %}
           <div style="margin-top:14px;">
-            <h3 style="margin-bottom:8px;font-size:1rem;">Qué ajustar si querés alinear filtros al régimen</h3>
+            <h3 style="margin-bottom:8px;font-size:1rem;">Régimen = telemetría (no muta el bot)</h3>
             <p class="muted" style="margin-top:0;font-size:13px;">
-              El bot sigue usando tu <span class="mono">BOT_SYMBOL_CONFIG</span> hasta que edites y <strong>reinicies</strong>.
-              Debajo: merge sugerido solo de claves de filtro/tiempos (no toca EMA, SL/TP en points, spreads, etc.).
+              La detección de tendencia/lateral es solo contexto para Telegram y este panel.
+              Los filtros siguen en <span class="mono">BOT_SYMBOL_CONFIG</span> (.env); no se actualizan en caliente
+              (<span class="mono">BOT_MARKET_REGIME_AUTO_APPLY=0</span> por defecto).
+              El JSON de abajo es <strong>referencia opcional</strong> si algún día querés tunear a mano con calma — no es una orden de merge.
             </p>
             {% for sym in regimes.keys()|sort %}
               {% set r = regimes[sym] %}
@@ -218,7 +447,7 @@
                   {% if r.get("hint_es") %}
                     <p class="muted" style="margin:8px 0 6px;font-size:13px;line-height:1.4;">{{ r.get("hint_es") }}</p>
                   {% endif %}
-                  <div class="muted" style="font-size:12px;margin-bottom:4px;">Merge en <span class="mono">BOT_SYMBOL_CONFIG["{{ sym }}"]</span>:</div>
+                  <div class="muted" style="font-size:12px;margin-bottom:4px;">Referencia opcional (no auto-aplicada):</div>
                   <pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:12px;color:#e5e7eb;">{{ r.get("suggested_config_patch_json") }}</pre>
                 </details>
               {% endif %}
@@ -232,10 +461,9 @@
     <div class="card">
       <h2>Exportar régimen para pegar en el chat</h2>
       <p class="muted" style="margin-top:0;">
-        Incluye etiqueta de régimen por símbolo + <strong>PATCHES</strong> sugeridos (merge en <span class="mono">BOT_SYMBOL_CONFIG</span>).
-        También podés abrir
-        <a href="{{ url_for('export_market_regime') }}" target="_blank" rel="noopener noreferrer"><span class="mono">/export/market-regime</span></a>
-        (texto solo) para copiar desde ahí.
+        Etiqueta de régimen por símbolo + JSON de <strong>referencia</strong> (telemetría; no se aplica solo).
+        También:
+        <a href="{{ url_for('export_market_regime') }}" target="_blank" rel="noopener noreferrer"><span class="mono">/export/market-regime</span></a>.
       </p>
       <textarea
         id="regime-export-box"

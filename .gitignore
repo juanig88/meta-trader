@@ -1,7 +1,73 @@
+# --- Secrets / local env (keep .env.example in git) ---
 .env
-.env-old
+.env.*
+.env-*
+!.env.example
+
+# --- Runtime state (bot writes these locally) ---
 bot_state.json
+symbol_config_overlay.json
+symbol_config_overlay.json-old
+regime_apply_audit.jsonl
 trades.log
 trades_watcher.log
+*.log
 Files/
 logs/
+
+# --- Python bytecode / caches ---
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+
+# --- Generated backtest / scan / replay dumps ---
+*.jsonl
+session_replay_results.jsonl
+docs/mejoras/otros instrumentos/deep-analysis/results/
+
+# --- Local backups (git history is the backup) ---
+*_old.py
+*-old.py
+*.bak
+*~
+
+# --- Compiled EAs / tester exports ---
+*.ex4
+*.ex5
+*.xlsx
+
+# --- Chat dumps (not source) ---
+*gemini_conversation*
+**/chat_gemini.txt
+
+# --- Screenshots / third-party signal charts ---
+docs/mejoras/bots/*.png
+docs/mejoras/bots/*.jpg
+docs/mejoras/bots/*.jpeg
+docs/mejoras/images/
+docs/mejoras/otros instrumentos/**/*.png
+docs/mejoras/otros instrumentos/**/*.jpg
+docs/mejoras/otros instrumentos/**/*.jpeg
+
+# --- MQL5 session secrets / local exports / scrape dumps ---
+docs/mejoras/bots/mql5_crawl/cookies.txt
+docs/mejoras/bots/mql5_crawl/.cookies*
+docs/mejoras/bots/mql5_crawl/*.json
+docs/mejoras/bots/mql5_crawl/*.jsonl
+docs/mejoras/bots/inbox_positions/*.csv
+docs/mejoras/bots/mql5_crawl/positions_csv/
+docs/mejoras/bots/*.positions.csv
+
+# --- OS / editor ---
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,10 @@
+{
+  "name": "auto_retry",
+  "description": "Automatically retry tool calls when they fail",
+  "retry": {
+    "enabled": true,
+    "max_attempts": 5,
+    "delay_seconds": 2,
+    "on_tool_failure": true
+  }
+}
