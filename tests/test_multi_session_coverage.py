@@ -107,5 +107,26 @@ class TestXauSharedRiskGates(unittest.TestCase):
         self.assertIn("max_open_trades_total", skips)
 
 
+    def test_weekend_blocks_parallel_entries_inside_clock_window(self) -> None:
+        cases = [
+            ("saturday", datetime(2026, 8, 8, 11, 0, 0)),
+            ("sunday", datetime(2026, 8, 9, 11, 0, 0)),
+        ]
+        for name, when in cases:
+            with self.subTest(name=name):
+                self.assertIn(when.weekday(), (5, 6))
+                skips: list[str] = []
+
+                def fake_skip(symbol, reason, **kwargs):
+                    skips.append(str(reason))
+
+                with patch.object(bot_mt5, "datetime") as mock_dt, patch.object(
+                    bot_mt5, "_xauusd_log_skip", side_effect=fake_skip
+                ), patch.object(bot_mt5, "_xauusd_parallel_positions", return_value=[]):
+                    mock_dt.now.return_value = when
+                    bot_mt5.run_xauusd_parallel_cycle(self.cfg)
+                self.assertEqual(skips, ["weekend_block"])
+
+
 if __name__ == "__main__":
     unittest.main()

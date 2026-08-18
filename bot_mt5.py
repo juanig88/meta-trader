@@ -4,7 +4,7 @@ import time
 import math
 import logging
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from datetime import time as dt_time
 from pathlib import Path
@@ -408,6 +408,19 @@ class Config:
     xauusd_parallel_one_trade_per_bar: bool = True
     # Tras el fill, aleja el SL por el spread actual (ask-bid) para no quedar dentro del ruido.
     xauusd_parallel_sl_spread_buffer: bool = True
+    # breakout (scan IS/OOS PF>1) | scalp (EMA9/21 — PF OOS ~0.70, no usar en live).
+    xauusd_parallel_entry_mode: str = "breakout"
+    # Cierra posiciones XAU al salir de la ventana / fin de semana (evita SL en el hueco).
+    xauusd_parallel_flatten_outside_window: bool = True
+    xauusd_parallel_anti_chase: bool = True
+    xauusd_parallel_anti_chase_atr_mult: float = 2.0
+    # Vela M15 > 1.5×ATR y cierre en el 20% extremo = chase/agotamiento (T1/T5/T6/T7).
+    xauusd_parallel_exhaustion_atr_mult: float = 1.5
+    xauusd_parallel_exhaustion_extreme_frac: float = 0.20
+    # No comprar/vender si el precio ya corre > 1×ATR vs EMA de la señal (EMA50 breakout / EMA9 scalp).
+    xauusd_parallel_extension_atr_max: float = 1.0
+    # Última M1 cerrada > 0.8×ATR(M15) = spike de 1 minuto (T7 10:29).
+    xauusd_parallel_m1_spike_atr_mult: float = 0.80
 
 
 def _log_event(payload: dict) -> None:
@@ -490,11 +503,13 @@ def _eval_tracks_state(cfg: Config, now: Optional[datetime] = None) -> dict[str,
     wall = now or datetime.now()
     tracks: list[dict[str, Any]] = []
     if bool(getattr(cfg, "xauusd_parallel_enabled", False)):
-        in_win = _xauusd_parallel_in_window(cfg, wall)
+        in_win = _xauusd_parallel_in_window(cfg, wall) and not _weekend_blocks_new_trade(
+            cfg, _xauusd_parallel_symbol(cfg), wall
+        )
         sym = _xauusd_parallel_symbol(cfg)
         tracks.append(
             {
-                "track": "xau_parallel_scalp",
+                "track": "xau_parallel_breakout",
                 "symbol": sym,
                 "path": "parallel",
                 "magic": int(cfg.xauusd_parallel_magic),
@@ -1957,6 +1972,16 @@ def connect_mt5(cfg: Config) -> bool:
     return False
 
 
+def _weekend_blocks_new_trade(cfg: Config, symbol: str, now: Optional[datetime] = None) -> bool:
+    """True if weekend_block is on, now is Sat/Sun, and symbol is not in weekend_trade_symbols."""
+    wall = now or datetime.now()
+    if not bool(getattr(cfg, "weekend_block_enabled", False)):
+        return False
+    if wall.weekday() not in (5, 6):
+        return False
+    return symbol not in (getattr(cfg, "weekend_trade_symbols", ()) or ())
+
+
 def _session_allows_new_trade(cfg: Config, symbol: str, now: Optional[datetime] = None) -> bool:
     """
     Calendar / session gate per symbol for **new** entries.
@@ -1976,9 +2001,8 @@ def _session_allows_new_trade(cfg: Config, symbol: str, now: Optional[datetime] 
     now = now or datetime.now()
     wd = now.weekday()  # Mon=0 .. Sun=6
 
-    if cfg.weekend_block_enabled and wd in (5, 6):
-        if symbol not in cfg.weekend_trade_symbols:
-            return False
+    if _weekend_blocks_new_trade(cfg, symbol, now):
+        return False
 
     if cfg.friday_cutoff_enabled:
         if wd == 4 and now.hour >= cfg.end_hour and (now.hour > cfg.end_hour or now.minute >= 0):
@@ -2395,7 +2419,8 @@ def _xauusd_exit_distances_from_atr(
 ) -> Tuple[float, float]:
     """Distancia SL/TP en precio a partir de ATR (testable, sin I/O)."""
     sl = max(float(atr_min), float(atr) * float(atr_mult))
-    tp = sl * max(0.1, float(tp_rr))
+    # Floor 1.5: RR 0.5 en live (Aug 16–17) exigía WR>67% y cerró negativo.
+    tp = sl * max(1.5, float(tp_rr))
     return float(sl), float(tp)
 
 
@@ -2419,6 +2444,181 @@ def _xauusd_h4_bias_allows(side: str, trend_h4: str) -> bool:
     if side == "BUY":
         return t != "DOWN"
     return False
+
+
+def _xauusd_effective_tp_rr(cfg: Optional[Config] = None) -> float:
+    raw = float(getattr(cfg, "xauusd_parallel_tp_rr", 2.0) or 2.0) if cfg is not None else 2.0
+    return max(1.5, raw)
+
+
+def _xauusd_effective_adx_min(cfg: Optional[Config] = None) -> float:
+    raw = float(getattr(cfg, "xauusd_parallel_adx_min", _XAUUSD_ADX_MIN) or _XAUUSD_ADX_MIN) if cfg is not None else float(_XAUUSD_ADX_MIN)
+    return max(22.0, raw)
+
+
+def _xauusd_entry_mode(cfg: Optional[Config] = None) -> str:
+    raw = str(getattr(cfg, "xauusd_parallel_entry_mode", "breakout") or "breakout").strip().lower() if cfg is not None else "breakout"
+    return raw if raw in ("breakout", "scalp") else "breakout"
+
+
+def _xauusd_should_flatten_now(cfg: Config, now: Optional[datetime] = None) -> bool:
+    """True si hay que cerrar XAU paralelo (fuera de ventana o fin de semana)."""
+    if not bool(getattr(cfg, "xauusd_parallel_flatten_outside_window", True)):
+        return False
+    wall = now or datetime.now()
+    if _weekend_blocks_new_trade(cfg, _xauusd_parallel_symbol(cfg), wall):
+        return True
+    return not _xauusd_parallel_in_window(cfg, wall)
+
+
+def _xauusd_exhaustion_skip_reason(
+    *,
+    side: str,
+    bar_high: float,
+    bar_low: float,
+    bar_close: float,
+    atr: float,
+    range_atr_mult: float = 1.5,
+    extreme_frac: float = 0.20,
+) -> Optional[str]:
+    """
+    Skip si la vela señal ya es un impulso > range_atr_mult×ATR y cierra en el
+    extremo del lado de la operación (comprar el high / vender el low).
+    """
+    rng = float(bar_high) - float(bar_low)
+    if atr is None or float(atr) <= 0 or rng <= 0:
+        return None
+    if rng <= float(atr) * float(range_atr_mult):
+        return None
+    s = str(side or "").strip().upper()
+    frac = max(0.0, min(0.5, float(extreme_frac)))
+    if s == "BUY" and (float(bar_high) - float(bar_close)) / rng <= frac:
+        return "anti_chase_exhaustion"
+    if s == "SELL" and (float(bar_close) - float(bar_low)) / rng <= frac:
+        return "anti_chase_exhaustion"
+    return None
+
+
+def _xauusd_extension_skip_reason(
+    *,
+    side: str,
+    price: Optional[float],
+    ema: Optional[float],
+    atr: float,
+    max_atr: float = 1.0,
+) -> Optional[str]:
+    """Skip si el fill/precio ya está > max_atr×ATR lejos de la EMA de la señal."""
+    if price is None or ema is None or atr is None or float(atr) <= 0:
+        return None
+    s = str(side or "").strip().upper()
+    dist = float(price) - float(ema)
+    cap = float(max_atr) * float(atr)
+    if s == "BUY" and dist > cap:
+        return "chase_extension"
+    if s == "SELL" and dist < -cap:
+        return "chase_extension"
+    return None
+
+
+def _xauusd_m1_spike_skip_reason(
+    *,
+    last_m1_range: Optional[float],
+    atr: float,
+    mult: float = 0.80,
+) -> Optional[str]:
+    """Skip si la última M1 cerrada es un spike vs ATR(M15)."""
+    if last_m1_range is None or atr is None or float(atr) <= 0:
+        return None
+    if float(last_m1_range) > float(mult) * float(atr):
+        return "m1_spike"
+    return None
+
+
+def _xauusd_live_bar_skip_reason(
+    *,
+    side: str,
+    bar_high: float,
+    bar_low: float,
+    bar_close: float,
+    atr: float,
+    price: Optional[float] = None,
+    ema: Optional[float] = None,
+    last_m1_range: Optional[float] = None,
+    range_hard_mult: float = 2.0,
+    exhaustion_atr_mult: float = 1.5,
+    exhaustion_extreme_frac: float = 0.20,
+    extension_atr_max: float = 1.0,
+    m1_spike_atr_mult: float = 0.80,
+) -> Optional[str]:
+    """Orden: rango duro → agotamiento → extensión vs EMA → spike M1."""
+    rng = float(bar_high) - float(bar_low)
+    if atr is None or float(atr) <= 0 or rng <= 0:
+        return None
+    if rng > float(atr) * float(range_hard_mult):
+        return "anti_chase"
+    reason = _xauusd_exhaustion_skip_reason(
+        side=side,
+        bar_high=bar_high,
+        bar_low=bar_low,
+        bar_close=bar_close,
+        atr=float(atr),
+        range_atr_mult=exhaustion_atr_mult,
+        extreme_frac=exhaustion_extreme_frac,
+    )
+    if reason:
+        return reason
+    reason = _xauusd_extension_skip_reason(
+        side=side,
+        price=price,
+        ema=ema,
+        atr=float(atr),
+        max_atr=extension_atr_max,
+    )
+    if reason:
+        return reason
+    return _xauusd_m1_spike_skip_reason(
+        last_m1_range=last_m1_range,
+        atr=float(atr),
+        mult=m1_spike_atr_mult,
+    )
+
+
+def _xauusd_breakout_skip_reason(
+    *,
+    adx: Optional[float],
+    adx_min: float,
+    signal_m15: str,
+    ema_dir: str,
+    trend_h4: str,
+    slope: str,
+    decision: str,
+) -> Optional[str]:
+    """Clasifica por qué generate_signal devolvió NONE (testable, sin I/O)."""
+    if decision in ("BUY", "SELL"):
+        return None
+    if adx is None:
+        return "data_missing"
+    if float(adx) < float(adx_min):
+        return "adx_flat"
+    sig = str(signal_m15 or "NONE").upper()
+    if sig == "NONE":
+        return "no_breakout"
+    ema = str(ema_dir or "FLAT").upper()
+    if sig == "BUY" and ema != "UP":
+        return "ema_mismatch"
+    if sig == "SELL" and ema != "DOWN":
+        return "ema_mismatch"
+    h4 = str(trend_h4 or "FLAT").upper()
+    if sig == "BUY" and h4 == "DOWN":
+        return "h4_bias"
+    if sig == "SELL" and h4 == "UP":
+        return "h4_bias"
+    sl = str(slope or "FLAT").upper()
+    if sig == "BUY" and sl != "UP":
+        return "slope"
+    if sig == "SELL" and sl != "DOWN":
+        return "slope"
+    return "no_setup"
 
 
 def _xauusd_parallel_sl_mode(cfg: Config) -> str:
@@ -2454,7 +2654,7 @@ def _xauusd_parallel_exit_distances(
     if atr_val is None or float(atr_val) <= 0:
         return None
     atr_mult = float(getattr(cfg, "xauusd_parallel_sl_atr_mult", 1.5) or 1.5)
-    tp_rr = float(getattr(cfg, "xauusd_parallel_tp_rr", 2.0) or 2.0)
+    tp_rr = _xauusd_effective_tp_rr(cfg)
     atr_min = float(getattr(cfg, "xauusd_parallel_sl_atr_min", 1.5) or 1.5)
     sl_dist, tp_dist = _xauusd_exit_distances_from_atr(
         float(atr_val), atr_mult=atr_mult, tp_rr=tp_rr, atr_min=atr_min
@@ -2582,15 +2782,33 @@ def get_atr(symbol: str, timeframe, period: int = 14) -> Optional[float]:
     return float(atr) if atr > 0 else None
 
 
+def _last_closed_bar_ohlc(symbol: str, timeframe) -> Optional[dict[str, float]]:
+    """OHLC of the last closed bar for `timeframe` (start_pos=1)."""
+    rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, 1)
+    if rates is None or len(rates) < 1:
+        return None
+    last = rates[0]
+    high = float(last["high"])
+    low = float(last["low"])
+    if high < low:
+        return None
+    return {
+        "open": float(last["open"]),
+        "high": high,
+        "low": low,
+        "close": float(last["close"]),
+        "time": float(last["time"]),
+    }
+
+
 def get_last_m15_bar_range(symbol: str) -> Optional[float]:
     """
     Returns (high - low) of the most recent CLOSED M15 candle, in price units.
     """
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, 1)
-    if rates is None or len(rates) < 1:
+    bar = _last_closed_bar_ohlc(symbol, mt5.TIMEFRAME_M15)
+    if bar is None:
         return None
-    last = rates[0]
-    rng = float(last["high"]) - float(last["low"])
+    rng = float(bar["high"]) - float(bar["low"])
     return rng if rng > 0 else None
 
 
@@ -2989,12 +3207,24 @@ def _is_symbol_handled_by_xauusd_parallel(cfg: Config, symbol: str) -> bool:
 
 
 def _xauusd_parallel_positions(cfg: Config) -> list:
-    sym = _xauusd_parallel_symbol(cfg)
+    """
+    Todas las posiciones del magic XAU, uniendo filtro por símbolo + listado global.
+    El filtro por símbolo solo puede devolver un subset (16 ago: 2 BUY solapadas
+    con max_positions=1). El magic 260415 es exclusivo de esta pista.
+    """
     magic = int(getattr(cfg, "xauusd_parallel_magic", 0) or 0)
-    pos = mt5.positions_get(symbol=sym)
-    if not pos:
+    if magic <= 0:
         return []
-    return [p for p in pos if _position_magic_int(p) == magic]
+    sym = _xauusd_parallel_symbol(cfg)
+    by_ticket: dict[int, Any] = {}
+    for src in (mt5.positions_get(symbol=sym), mt5.positions_get()):
+        for p in src or ():
+            if _position_magic_int(p) != magic:
+                continue
+            ticket = int(getattr(p, "ticket", 0) or 0)
+            key = ticket if ticket > 0 else id(p)
+            by_ticket[key] = p
+    return list(by_ticket.values())
 
 
 def _xauusd_hourly_clear_for_tests() -> None:
@@ -3103,7 +3333,15 @@ def _xauusd_hourly_snapshot(
         "spread_sum": 0.0,
         "spread_n": 0,
     }
-    in_window = {"signals": 0, "opens": 0, "closes": 0, "skips": 0, "pnl": 0.0}
+    in_window = {
+        "signals": 0,
+        "opens": 0,
+        "closes": 0,
+        "skips": 0,
+        "pnl": 0.0,
+        "spread_sum": 0.0,
+        "spread_n": 0,
+    }
 
     for h in sorted(_XAUUSD_HOURLY.keys()):
         b = _XAUUSD_HOURLY[h]
@@ -3118,7 +3356,11 @@ def _xauusd_hourly_snapshot(
             "skips": int(b.get("skips", 0) or 0),
             "pnl": round(float(b["pnl"]), 4),
             "spread_avg": spread_avg,
-            "in_window": bool(start_h <= int(h) < end_h),
+            "in_window": (
+                bool(_xauusd_parallel_in_window(cfg, wall.replace(hour=int(h), minute=0, second=0, microsecond=0)))
+                if cfg is not None
+                else bool(start_h <= int(h) < end_h)
+            ),
         }
         by_hour.append(row)
         totals["signals"] += row["signals"]
@@ -3134,6 +3376,8 @@ def _xauusd_hourly_snapshot(
             in_window["closes"] += row["closes"]
             in_window["skips"] += row["skips"]
             in_window["pnl"] = round(float(in_window["pnl"]) + float(row["pnl"]), 4)
+            in_window["spread_sum"] = float(in_window["spread_sum"]) + float(b["spread_sum"])
+            in_window["spread_n"] += spread_n
 
     tot_spread_n = int(totals["spread_n"])
     totals_out = {
@@ -3151,11 +3395,18 @@ def _xauusd_hourly_snapshot(
         "window": {
             "start_hour": start_h,
             "end_hour": end_h,
+            "label": _xauusd_parallel_window_label(cfg) if cfg is not None else f"{start_h:02d}:00–{end_h:02d}:00",
+            "sessions": str(getattr(cfg, "xauusd_parallel_sessions", "") or "") if cfg is not None else "",
             "signals": int(in_window["signals"]),
             "opens": int(in_window["opens"]),
             "closes": int(in_window["closes"]),
             "skips": int(in_window["skips"]),
             "pnl": round(float(in_window["pnl"]), 4),
+            "spread_avg": (
+                round(float(in_window["spread_sum"]) / int(in_window["spread_n"]), 1)
+                if int(in_window["spread_n"]) > 0
+                else None
+            ),
         },
     }
 
@@ -3849,7 +4100,7 @@ def _telegram_format_startup_message(
         in_win = _xauusd_parallel_in_window(cfg, wall)
         win_state = "ABIERTA" if in_win else "CERRADA"
         lines.append(
-            f"XAUUSD scalper: ON · {sym} · magic {int(cfg.xauusd_parallel_magic)} · "
+            f"XAUUSD parallel: ON · {sym} · {_xauusd_entry_mode(cfg)} · magic {int(cfg.xauusd_parallel_magic)} · "
             f"{_xauusd_parallel_window_label(cfg)} local ({win_state})"
         )
         mode = _xauusd_parallel_sl_mode(cfg)
@@ -3873,7 +4124,7 @@ def _telegram_format_startup_message(
             f"1/vela={'sí' if bool(cfg.xauusd_parallel_one_trade_per_bar) else 'no'}"
         )
     else:
-        lines.append("XAUUSD scalper: OFF")
+        lines.append("XAUUSD parallel: OFF")
 
     rows = list(recon.get("positions") or [])
     par_magic = (
@@ -6105,16 +6356,112 @@ def execute_trade(cfg: Config, symbol: str, signal: Signal) -> bool:
     return False
 
 
+def _xauusd_apply_anti_chase(symbol: str, cfg: Optional[Config], out: dict[str, Any]) -> dict[str, Any]:
+    """
+    Bloquea chase/agotamiento: rango M15 duro, cierre en el extremo, extensión vs EMA, spike M1.
+    """
+    if out.get("decision") not in ("BUY", "SELL"):
+        return out
+    if cfg is None or not bool(getattr(cfg, "xauusd_parallel_anti_chase", True)):
+        return out
+    m15 = _last_closed_bar_ohlc(symbol, mt5.TIMEFRAME_M15)
+    atr_val = get_atr(symbol, mt5.TIMEFRAME_M15, 20)
+    if m15 is None or atr_val is None or atr_val <= 0:
+        return out
+    m1 = _last_closed_bar_ohlc(symbol, mt5.TIMEFRAME_M1)
+    m1_range = None if m1 is None else float(m1["high"]) - float(m1["low"])
+    ema_ref = out.get("ema_fast")
+    try:
+        ema_f = None if ema_ref is None else float(ema_ref)
+    except (TypeError, ValueError):
+        ema_f = None
+    price = out.get("price")
+    try:
+        px = None if price is None else float(price)
+    except (TypeError, ValueError):
+        px = None
+    reason = _xauusd_live_bar_skip_reason(
+        side=str(out.get("decision") or ""),
+        bar_high=float(m15["high"]),
+        bar_low=float(m15["low"]),
+        bar_close=float(m15["close"]),
+        atr=float(atr_val),
+        price=px,
+        ema=ema_f,
+        last_m1_range=m1_range,
+        range_hard_mult=float(getattr(cfg, "xauusd_parallel_anti_chase_atr_mult", 2.0) or 2.0),
+        exhaustion_atr_mult=float(getattr(cfg, "xauusd_parallel_exhaustion_atr_mult", 1.5) or 1.5),
+        exhaustion_extreme_frac=float(getattr(cfg, "xauusd_parallel_exhaustion_extreme_frac", 0.20) or 0.20),
+        extension_atr_max=float(getattr(cfg, "xauusd_parallel_extension_atr_max", 1.0) or 1.0),
+        m1_spike_atr_mult=float(getattr(cfg, "xauusd_parallel_m1_spike_atr_mult", 0.80) or 0.80),
+    )
+    if reason:
+        out["decision"] = "NONE"
+        out["skip_reason"] = reason
+        out["bar_range"] = round(float(m15["high"]) - float(m15["low"]), 5)
+        out["atr"] = round(float(atr_val), 5)
+        out["anti_chase_mult"] = float(getattr(cfg, "xauusd_parallel_anti_chase_atr_mult", 2.0) or 2.0)
+        if m1_range is not None:
+            out["m1_range"] = round(float(m1_range), 5)
+    return out
+
+
+def _xauusd_breakout_eval(symbol: str, cfg: Optional[Config], out: dict[str, Any]) -> dict[str, Any]:
+    """Señal breakout M15 (misma que el scan IS/OOS PF 1.12/1.26), no EMA9/21."""
+    adx_min = float(out.get("adx_min") or _xauusd_effective_adx_min(cfg))
+    trend_h4 = get_trend_h4(symbol)
+    signal_m15 = get_signal_m15(symbol)
+    ema_dir = ema_trend(symbol, 50, 200)
+    ema_fast = get_ema(symbol, mt5.TIMEFRAME_M15, 50)
+    ema_slow = get_ema(symbol, mt5.TIMEFRAME_M15, 200)
+    slope = _m15_slope_trend(symbol, n_closes=6)
+    adx_val = out.get("adx")
+    out["entry_mode"] = "breakout"
+    out["trend_h4"] = str(trend_h4)
+    out["signal_m15"] = str(signal_m15)
+    out["ema_dir"] = str(ema_dir)
+    out["ema_fast"] = None if ema_fast is None else round(float(ema_fast), 5)
+    out["ema_slow"] = None if ema_slow is None else round(float(ema_slow), 5)
+    out["ema_fast_period"] = 50
+    out["ema_slow_period"] = 200
+    out["price_slope_m15"] = str(slope)
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, 2)
+    if rates is not None and len(rates) >= 1:
+        out["cross_bar_time"] = int(rates[0]["time"])
+    decision = generate_signal(
+        trend_h4=trend_h4,
+        signal_m15=signal_m15,
+        ema_dir=ema_dir,
+        adx=None if adx_val is None else float(adx_val),
+        adx_min=adx_min,
+        symbol=symbol,
+        crypto_sell_requires_h4_down=False,
+        allow_flat_h4=True,
+        m15_price_slope=slope,
+        price_slope_filter_enabled=True,
+        ema_fast=ema_fast,
+        ema_slow=ema_slow,
+    )
+    out["decision"] = decision
+    if decision == "NONE":
+        out["skip_reason"] = _xauusd_breakout_skip_reason(
+            adx=None if adx_val is None else float(adx_val),
+            adx_min=adx_min,
+            signal_m15=str(signal_m15),
+            ema_dir=str(ema_dir),
+            trend_h4=str(trend_h4),
+            slope=str(slope),
+            decision=str(decision),
+        )
+    return out
+
+
 def _xauusd_scalping_eval(symbol: str, cfg: Optional[Config] = None) -> dict[str, Any]:
     """
-    Evalúa scalping XAUUSD M15 y devuelve decisión + features para logging.
-    Entrada solo en cruce EMA9/21 sobre velas cerradas (no estado persistente).
+    Evalúa entrada XAUUSD paralelo (breakout por defecto; scalp EMA9/21 solo si entry_mode=scalp).
     decision: BUY | SELL | NONE
-    skip_reason (si NONE): data_missing | adx_flat | no_cross | h1_bias | h4_bias
     """
-    adx_min = float(
-        getattr(cfg, "xauusd_parallel_adx_min", _XAUUSD_ADX_MIN) if cfg is not None else _XAUUSD_ADX_MIN
-    )
+    adx_min = _xauusd_effective_adx_min(cfg)
     h1_filter = bool(getattr(cfg, "xauusd_parallel_h1_filter", True)) if cfg is not None else True
     h4_filter = bool(getattr(cfg, "xauusd_parallel_h4_filter", True)) if cfg is not None else True
     h1_period = int(
@@ -6123,8 +6470,6 @@ def _xauusd_scalping_eval(symbol: str, cfg: Optional[Config] = None) -> dict[str
         else _XAUUSD_H1_EMA_PERIOD
     ) or _XAUUSD_H1_EMA_PERIOD
 
-    count = max(_XAUUSD_EMA_SLOW + 40, _XAUUSD_EMA_SLOW + 5)
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, count)
     adx_val = get_adx(symbol, mt5.TIMEFRAME_M15, _XAUUSD_ADX_PERIOD)
     tick = mt5.symbol_info_tick(symbol)
 
@@ -6145,9 +6490,20 @@ def _xauusd_scalping_eval(symbol: str, cfg: Optional[Config] = None) -> dict[str
         "price": None,
         "cross_bar_time": None,
         "skip_reason": None,
+        "entry_mode": _xauusd_entry_mode(cfg),
     }
+    if adx_val is None or tick is None:
+        out["skip_reason"] = "data_missing"
+        return out
+    out["price"] = round(float(tick.bid), 5)
 
-    if rates is None or len(rates) < (_XAUUSD_EMA_SLOW + 2) or adx_val is None or tick is None:
+    if _xauusd_entry_mode(cfg) == "breakout":
+        out = _xauusd_breakout_eval(symbol, cfg, out)
+        return _xauusd_apply_anti_chase(symbol, cfg, out)
+
+    count = max(_XAUUSD_EMA_SLOW + 40, _XAUUSD_EMA_SLOW + 5)
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 1, count)
+    if rates is None or len(rates) < (_XAUUSD_EMA_SLOW + 2):
         out["skip_reason"] = "data_missing"
         return out
 
@@ -6169,7 +6525,6 @@ def _xauusd_scalping_eval(symbol: str, cfg: Optional[Config] = None) -> dict[str
     out["ema_slow_prev"] = round(float(ema_slow_prev), 5)
     out["cross_bar_time"] = int(rates[i]["time"])
     price = float(tick.bid)
-    out["price"] = round(price, 5)
 
     if float(adx_val) < float(adx_min):
         out["skip_reason"] = "adx_flat"
@@ -6185,7 +6540,6 @@ def _xauusd_scalping_eval(symbol: str, cfg: Optional[Config] = None) -> dict[str
         out["skip_reason"] = "no_cross"
         return out
 
-    # Confirmación mínima: precio del lado correcto de la EMA rápida tras el cruce.
     if decision == "BUY" and price <= float(ema_fast):
         out["skip_reason"] = "no_cross"
         return out
@@ -6211,7 +6565,46 @@ def _xauusd_scalping_eval(symbol: str, cfg: Optional[Config] = None) -> dict[str
             return out
 
     out["decision"] = decision
-    return out
+    return _xauusd_apply_anti_chase(symbol, cfg, out)
+
+
+def _xauusd_flatten_outside_window(cfg: Config, now: Optional[datetime] = None) -> None:
+    """Cierra XAU paralelo a mercado al salir de la ventana (ATR mode no lo hacía)."""
+    if not _xauusd_should_flatten_now(cfg, now):
+        return
+    wall = now or datetime.now()
+    sym = _xauusd_parallel_symbol(cfg)
+    for p in _xauusd_parallel_positions(cfg):
+        ticket = int(getattr(p, "ticket", 0) or 0)
+        side = _position_side(p)
+        lot = float(getattr(p, "volume", cfg.xauusd_parallel_lot) or cfg.xauusd_parallel_lot)
+        profit = float(getattr(p, "profit", 0.0) or 0.0)
+        if side is None or ticket <= 0:
+            continue
+        ok = _close_position_market(sym, ticket, lot, side, comment="xauusd_session_end")
+        _xauusd_record_soft_close(ticket=ticket, profit=profit, when=wall, closed=bool(ok))
+        _log_event(
+            {
+                "event": "XAUUSD_PARALLEL_CLOSE",
+                "ts": wall.isoformat(timespec="seconds"),
+                "symbol": sym,
+                "ticket": ticket,
+                "position_id": ticket,
+                "side": side,
+                "profit": round(profit, 4),
+                "reason": "session_end",
+                "closed": bool(ok),
+                "magic": int(cfg.xauusd_parallel_magic),
+                "hour": wall.hour,
+            }
+        )
+        logging.info(
+            "[%s] XAUUSD flatten outside window: ticket=%d profit=%.2f closed=%s",
+            sym,
+            ticket,
+            profit,
+            ok,
+        )
 
 
 def _xauusd_scalping_signal(symbol: str, cfg: Optional[Config] = None) -> Signal:
@@ -6221,13 +6614,14 @@ def _xauusd_scalping_signal(symbol: str, cfg: Optional[Config] = None) -> Signal
 
 def manage_xauusd_parallel_positions(cfg: Config) -> None:
     """
-    Gestión de salida XAUUSD paralelo (solo modo money):
-      - profit >= tp_money → cierre inmediato a mercado
-      - profit <= -sl_money → cierre por pérdida
-    En modo atr las salidas son SL/TP del bróker (el soft-close a $ fijos destruye el RR).
+    Gestión de salida XAUUSD paralelo:
+      - flatten al salir de ventana / fin de semana (ATR y money)
+      - modo money: profit >= tp_money → cierre; profit <= -sl_money → cierre
+    En modo atr las salidas normales son SL/TP del bróker.
     """
     if not bool(cfg.xauusd_parallel_enabled):
         return
+    _xauusd_flatten_outside_window(cfg)
     if _xauusd_parallel_sl_mode(cfg) != "money":
         return
 
@@ -6608,6 +7002,15 @@ def run_xauusd_parallel_cycle(cfg: Config) -> None:
 
     # 1. Filtro Horario (sessions multi-franja o start/end hour)
     now = datetime.now()
+    if _weekend_blocks_new_trade(cfg, sym, now):
+        _xauusd_log_skip(
+            sym,
+            "weekend_block",
+            when=now,
+            weekday=int(now.weekday()),
+            count_hourly=False,
+        )
+        return
     if not _xauusd_parallel_in_window(cfg, now):
         _xauusd_log_skip(
             sym,
@@ -6727,7 +7130,7 @@ def run_xauusd_parallel_cycle(cfg: Config) -> None:
         )
         return
 
-    logging.info("[%s] XAUUSD parallel signal: Scalping M15 EMA cross → %s", sym, decision)
+    logging.info("[%s] XAUUSD parallel signal: %s → %s", sym, eval_.get("entry_mode") or "breakout", decision)
     _xauusd_record_hourly("signal", when=now)
     _XAUUSD_LAST_SIGNAL = {
         "ts": now.isoformat(timespec="seconds"),
@@ -6758,7 +7161,7 @@ def run_xauusd_parallel_cycle(cfg: Config) -> None:
             "price": eval_.get("price"),
             "bar_time": bar_t,
             "cross_bar_time": cross_bar,
-            "entry_mode": "ema_cross",
+            "entry_mode": eval_.get("entry_mode") or _xauusd_entry_mode(cfg),
             "trend_h4": eval_.get("trend_h4"),
             "h4_filter": eval_.get("h4_filter"),
             "h1_ema": eval_.get("h1_ema"),
@@ -6949,14 +7352,37 @@ def main() -> int:
         xauusd_parallel_h4_filter=_env_bool("BOT_XAUUSD_PARALLEL_H4_FILTER", True),
         xauusd_parallel_h1_ema_period=int(float(_env("BOT_XAUUSD_PARALLEL_H1_EMA_PERIOD", "20"))),
         xauusd_parallel_start_hour=int(float(_env("BOT_XAUUSD_PARALLEL_START_HOUR", "10"))),
-        xauusd_parallel_end_hour=int(float(_env("BOT_XAUUSD_PARALLEL_END_HOUR", "13"))),
-        xauusd_parallel_sessions=str(_env("BOT_XAUUSD_PARALLEL_SESSIONS", "") or "").strip(),
+        xauusd_parallel_end_hour=int(float(_env("BOT_XAUUSD_PARALLEL_END_HOUR", "16"))),
+        xauusd_parallel_sessions=str(_env("BOT_XAUUSD_PARALLEL_SESSIONS", "10:00-16:00,19:00-21:00") or "").strip(),
         xauusd_parallel_max_positions=max(1, int(float(_env("BOT_XAUUSD_PARALLEL_MAX_POSITIONS", "1")))),
         xauusd_parallel_max_spread_points=float(_env("BOT_XAUUSD_PARALLEL_MAX_SPREAD_POINTS", "55")),
         xauusd_parallel_cooldown_seconds=float(_env("BOT_XAUUSD_PARALLEL_COOLDOWN_SECONDS", "300")),
         xauusd_parallel_one_trade_per_bar=_env_bool("BOT_XAUUSD_PARALLEL_ONE_TRADE_PER_BAR", True),
         xauusd_parallel_sl_spread_buffer=_env_bool("BOT_XAUUSD_PARALLEL_SL_SPREAD_BUFFER", True),
+        xauusd_parallel_entry_mode=str(_env("BOT_XAUUSD_PARALLEL_ENTRY_MODE", "breakout") or "breakout").strip().lower(),
+        xauusd_parallel_flatten_outside_window=_env_bool("BOT_XAUUSD_PARALLEL_FLATTEN_OUTSIDE_WINDOW", True),
+        xauusd_parallel_anti_chase=_env_bool("BOT_XAUUSD_PARALLEL_ANTI_CHASE", True),
+        xauusd_parallel_anti_chase_atr_mult=float(_env("BOT_XAUUSD_PARALLEL_ANTI_CHASE_ATR_MULT", "2.0")),
+        xauusd_parallel_exhaustion_atr_mult=float(_env("BOT_XAUUSD_PARALLEL_EXHAUSTION_ATR_MULT", "1.5")),
+        xauusd_parallel_exhaustion_extreme_frac=float(_env("BOT_XAUUSD_PARALLEL_EXHAUSTION_EXTREME_FRAC", "0.20")),
+        xauusd_parallel_extension_atr_max=float(_env("BOT_XAUUSD_PARALLEL_EXTENSION_ATR_MAX", "1.0")),
+        xauusd_parallel_m1_spike_atr_mult=float(_env("BOT_XAUUSD_PARALLEL_M1_SPIKE_ATR_MULT", "0.80")),
     )
+
+    rr_raw = float(cfg.xauusd_parallel_tp_rr)
+    adx_raw = float(cfg.xauusd_parallel_adx_min)
+    rr_eff = _xauusd_effective_tp_rr(cfg)
+    adx_eff = _xauusd_effective_adx_min(cfg)
+    if rr_raw < rr_eff or adx_raw < adx_eff:
+        logging.warning(
+            "XAUUSD parallel clamps applied: TP_RR %.2f→%.2f, ADX_MIN %.1f→%.1f "
+            "(RR<1.5 was negative expectancy in live 16–17 Aug).",
+            rr_raw,
+            rr_eff,
+            adx_raw,
+            adx_eff,
+        )
+        cfg = replace(cfg, xauusd_parallel_tp_rr=rr_eff, xauusd_parallel_adx_min=adx_eff)
 
     if _overlay_symbol_cfg:
         logging.info(
@@ -6984,8 +7410,8 @@ def main() -> int:
     if cfg.xauusd_parallel_enabled:
         logging.info(
             "XAUUSD parallel strategy ON | symbol=%s | magic=%d | lot=%.4f | tp=$%.2f | sl=$%.2f | "
-            "window=%s | RR=%.2f | ADX>=%.0f | max_pos=%d | cooldown=%ss | one_per_m15=%s | sl_spread_buf=%s "
-            "(main loop skips %s; M15 EMA cross + broker SL/TP from fill)",
+            "window=%s | RR=%.2f | ADX>=%.0f | mode=%s | flatten_off_window=%s | max_pos=%d | cooldown=%ss | "
+            "one_per_m15=%s | sl_spread_buf=%s (main loop skips %s; breakout M15 + ATR SL/TP)",
             cfg.xauusd_parallel_symbol,
             cfg.xauusd_parallel_magic,
             cfg.xauusd_parallel_lot,
@@ -6994,6 +7420,8 @@ def main() -> int:
             _xauusd_parallel_window_label(cfg),
             float(cfg.xauusd_parallel_tp_rr),
             float(cfg.xauusd_parallel_adx_min),
+            _xauusd_entry_mode(cfg),
+            bool(cfg.xauusd_parallel_flatten_outside_window),
             cfg.xauusd_parallel_max_positions,
             int(cfg.xauusd_parallel_cooldown_seconds),
             bool(cfg.xauusd_parallel_one_trade_per_bar),
@@ -7005,7 +7433,7 @@ def main() -> int:
     if cfg.xauusd_parallel_enabled:
         boot_tracks.append(
             {
-                "track": "xau_parallel_scalp",
+                "track": "xau_parallel_breakout",
                 "symbol": cfg.xauusd_parallel_symbol,
                 "magic": cfg.xauusd_parallel_magic,
                 "window": f"{_xauusd_parallel_window_label(cfg)} LOCAL",
@@ -7208,55 +7636,8 @@ def main() -> int:
                         "weights": dict(_portfolio_dynamic_weights) if bool(cfg.portfolio_dynamic_enabled) else dict(cfg.portfolio_weights),
                         "last_rebalance_ts": _portfolio_last_rebalance.isoformat(timespec="seconds") if _portfolio_last_rebalance else None,
                     }
-                if cfg.xauusd_parallel_enabled:
-                    open_snap = _xauusd_open_snapshot(cfg)
-                    hourly = _xauusd_hourly_snapshot(cfg)
-                    totals = hourly.get("totals") or {}
-                    sl_mode = _xauusd_parallel_sl_mode(cfg)
-                    state["xauusd_parallel"] = {
-                        "enabled": True,
-                        "symbol": _xauusd_parallel_symbol(cfg),
-                        "magic": int(cfg.xauusd_parallel_magic),
-                        "open_positions": int(open_snap.get("count") or 0),
-                        "tp_money": float(cfg.xauusd_parallel_tp_money),
-                        "sl_money": float(cfg.xauusd_parallel_sl_money),
-                        "sl_mode": sl_mode,
-                        "sl_atr_mult": float(cfg.xauusd_parallel_sl_atr_mult),
-                        "tp_rr": float(cfg.xauusd_parallel_tp_rr),
-                        "adx_min": float(cfg.xauusd_parallel_adx_min),
-                        "h1_filter": bool(cfg.xauusd_parallel_h1_filter),
-                        "h4_filter": bool(cfg.xauusd_parallel_h4_filter),
-                        "start_hour": int(cfg.xauusd_parallel_start_hour),
-                        "end_hour": int(cfg.xauusd_parallel_end_hour),
-                        "sessions": str(cfg.xauusd_parallel_sessions or ""),
-                        "window_label": _xauusd_parallel_window_label(cfg),
-                        "in_window": _xauusd_parallel_in_window(cfg, datetime.now()),
-                        "max_positions": int(cfg.xauusd_parallel_max_positions),
-                        "cooldown_seconds": float(cfg.xauusd_parallel_cooldown_seconds),
-                        "cooldown_remaining_sec": round(_xauusd_cooldown_remaining_sec(cfg), 1),
-                        "one_trade_per_bar": bool(cfg.xauusd_parallel_one_trade_per_bar),
-                        "position": open_snap,
-                        "last_signal": _XAUUSD_LAST_SIGNAL,
-                        "last_skip": _XAUUSD_LAST_SKIP,
-                        "skip_reasons": dict(_XAUUSD_SKIP_REASONS),
-                        "hourly": hourly,
-                        "session": {
-                            "signals": int(totals.get("signals") or 0),
-                            "opens": int(totals.get("opens") or 0),
-                            "closes": int(totals.get("closes") or 0),
-                            "skips": int(totals.get("skips") or 0),
-                            "pnl": float(totals.get("pnl") or 0.0),
-                            "spread_avg": totals.get("spread_avg"),
-                            "open_close_gap": int(totals.get("opens") or 0) - int(totals.get("closes") or 0),
-                        },
-                    }
 
                 now_loop = datetime.now()
-                try:
-                    state["eval_tracks"] = _eval_tracks_state(cfg, now_loop)
-                except Exception:
-                    logging.exception("eval_tracks_state failed")
-                    state["eval_tracks"] = {"tracks": [], "error": "build_failed"}
                 allowed_syms = [s for s in cfg.symbols if _session_allows_new_trade(cfg, s, now_loop)]
                 if not allowed_syms:
                     logging.info(
@@ -7424,6 +7805,59 @@ def main() -> int:
 
                 if cfg.xauusd_parallel_enabled:
                     run_xauusd_parallel_cycle(cfg)
+                    state["open_positions_total"] = total_open_positions()
+                    state["open_positions_managed"] = _count_managed_open_positions(cfg)
+                    open_snap = _xauusd_open_snapshot(cfg)
+                    hourly = _xauusd_hourly_snapshot(cfg)
+                    totals = hourly.get("totals") or {}
+                    sl_mode = _xauusd_parallel_sl_mode(cfg)
+                    snap_now = datetime.now()
+                    state["xauusd_parallel"] = {
+                        "enabled": True,
+                        "symbol": _xauusd_parallel_symbol(cfg),
+                        "magic": int(cfg.xauusd_parallel_magic),
+                        "open_positions": int(open_snap.get("count") or 0),
+                        "tp_money": float(cfg.xauusd_parallel_tp_money),
+                        "sl_money": float(cfg.xauusd_parallel_sl_money),
+                        "sl_mode": sl_mode,
+                        "sl_atr_mult": float(cfg.xauusd_parallel_sl_atr_mult),
+                        "tp_rr": float(cfg.xauusd_parallel_tp_rr),
+                        "adx_min": float(cfg.xauusd_parallel_adx_min),
+                        "h1_filter": bool(cfg.xauusd_parallel_h1_filter),
+                        "h4_filter": bool(cfg.xauusd_parallel_h4_filter),
+                        "start_hour": int(cfg.xauusd_parallel_start_hour),
+                        "end_hour": int(cfg.xauusd_parallel_end_hour),
+                        "sessions": str(cfg.xauusd_parallel_sessions or ""),
+                        "window_label": _xauusd_parallel_window_label(cfg),
+                        "in_window": (
+                            _xauusd_parallel_in_window(cfg, snap_now)
+                            and not _weekend_blocks_new_trade(cfg, _xauusd_parallel_symbol(cfg), snap_now)
+                        ),
+                        "max_positions": int(cfg.xauusd_parallel_max_positions),
+                        "cooldown_seconds": float(cfg.xauusd_parallel_cooldown_seconds),
+                        "cooldown_remaining_sec": round(_xauusd_cooldown_remaining_sec(cfg), 1),
+                        "one_trade_per_bar": bool(cfg.xauusd_parallel_one_trade_per_bar),
+                        "position": open_snap,
+                        "last_signal": _XAUUSD_LAST_SIGNAL,
+                        "last_skip": _XAUUSD_LAST_SKIP,
+                        "skip_reasons": dict(_XAUUSD_SKIP_REASONS),
+                        "hourly": hourly,
+                        "session": {
+                            "signals": int(totals.get("signals") or 0),
+                            "opens": int(totals.get("opens") or 0),
+                            "closes": int(totals.get("closes") or 0),
+                            "skips": int(totals.get("skips") or 0),
+                            "pnl": float(totals.get("pnl") or 0.0),
+                            "spread_avg": totals.get("spread_avg"),
+                            "open_close_gap": int(totals.get("opens") or 0) - int(totals.get("closes") or 0),
+                        },
+                    }
+
+                try:
+                    state["eval_tracks"] = _eval_tracks_state(cfg, datetime.now())
+                except Exception:
+                    logging.exception("eval_tracks_state failed")
+                    state["eval_tracks"] = {"tracks": [], "error": "build_failed"}
 
                 _save_state(state)
 

@@ -59,6 +59,7 @@ class TestXauusdHourlyStats(unittest.TestCase):
         self.assertEqual(snap["window"]["opens"], 1)
         self.assertEqual(snap["window"]["closes"], 2)
         self.assertEqual(snap["window"]["skips"], 1)
+        self.assertAlmostEqual(snap["window"]["spread_avg"], 32.5, places=1)
 
     def test_new_day_resets_buckets(self) -> None:
         bot_mt5._xauusd_record_hourly("signal", when=datetime(2026, 8, 5, 12, 0))
@@ -80,6 +81,28 @@ class TestXauusdHourlyStats(unittest.TestCase):
         self.assertAlmostEqual(snap["window"]["pnl"], 0.0, places=4)
         row15 = next(r for r in snap["by_hour"] if r["hour"] == 15)
         self.assertFalse(row15["in_window"])
+
+    def test_multi_session_in_window_flags(self) -> None:
+        cfg = Config(xauusd_parallel_sessions="07:00-10:00,14:00-16:00,19:00-23:00")
+        hours = [8, 12, 14, 18, 19]
+        for h in hours:
+            bot_mt5._xauusd_record_hourly("signal", when=datetime(2026, 8, 5, h, 15))
+        snap = bot_mt5._xauusd_hourly_snapshot(cfg, now=datetime(2026, 8, 5, 20, 0))
+        by_hour = {r["hour"]: r["in_window"] for r in snap["by_hour"]}
+        cases = [
+            ("morning", 8, True),
+            ("gap_midday", 12, False),
+            ("afternoon", 14, True),
+            ("gap_evening", 18, False),
+            ("night", 19, True),
+        ]
+        for name, hour, want in cases:
+            with self.subTest(name=name):
+                self.assertEqual(by_hour[hour], want)
+        self.assertEqual(snap["window"]["signals"], 3)
+        self.assertEqual(snap["totals"]["signals"], 5)
+        self.assertIn("14:00", snap["window"]["label"])
+        self.assertIn("19:00", snap["window"]["label"])
 
     def test_invalid_spread_ignored(self) -> None:
         bot_mt5._xauusd_record_hourly(

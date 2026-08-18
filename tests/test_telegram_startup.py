@@ -39,7 +39,7 @@ class TestTelegramStartupMessage(unittest.TestCase):
                 "now": datetime(2026, 8, 5, 15, 0),
                 "recon": {"positions_managed": 0, "pending_orders": 0, "positions": []},
                 "want_substr": [
-                    "XAUUSD scalper: ON",
+                    "XAUUSD parallel: ON",
                     "magic 260415",
                     "10:00–13:00 local (CERRADA)",
                     "ATR×1.50 · RR 2.00",
@@ -49,7 +49,7 @@ class TestTelegramStartupMessage(unittest.TestCase):
                     "Inventario: loop=0 (gestionadas=0) · xauusd=0 · pendientes=0",
                     "Loop: EURUSD, USDJPY · magic 260414",
                 ],
-                "want_absent": ["XAUUSD scalper: OFF"],
+                "want_absent": ["XAUUSD parallel: OFF"],
             },
             {
                 "name": "parallel_on_inside_window_with_pos",
@@ -82,8 +82,8 @@ class TestTelegramStartupMessage(unittest.TestCase):
                 "cfg": Config(symbols=("GBPUSD",), magic=1, xauusd_parallel_enabled=False),
                 "now": datetime(2026, 8, 5, 12, 0),
                 "recon": {"positions_managed": 0, "pending_orders": 0, "positions": []},
-                "want_substr": ["XAUUSD scalper: OFF", "Loop: GBPUSD · magic 1"],
-                "want_absent": ["XAUUSD scalper: ON"],
+                "want_substr": ["XAUUSD parallel: OFF", "Loop: GBPUSD · magic 1"],
+                "want_absent": ["XAUUSD parallel: ON"],
             },
         ]
 

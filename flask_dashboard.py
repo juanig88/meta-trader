@@ -109,7 +109,7 @@ def _tracks_from_env_fallback() -> list[dict]:
             window = f"{start_h:02d}:00-{end_h:02d}:00"
         tracks.append(
             {
-                "track": "xau_parallel_scalp",
+                "track": "xau_parallel_breakout",
                 "symbol": (os.getenv("BOT_XAUUSD_PARALLEL_SYMBOL") or "XAUUSD").strip().upper(),
                 "path": "parallel",
                 "window": window,

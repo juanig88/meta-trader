@@ -236,7 +236,7 @@
 
       {% if xauusd_state.get('enabled') %}
       <div class="card">
-        <h2>Scalper XAUUSD (M15 parallel)</h2>
+        <h2>XAUUSD parallel (breakout M15)</h2>
         {% set pos = xauusd_state.get('position') or {} %}
         {% set session = xauusd_state.get('session') or {} %}
         {% set last_sig = xauusd_state.get('last_signal') or {} %}
@@ -296,10 +296,10 @@
           </div>
         </div>
         {% set hourly = xauusd_state.get('hourly') or {} %}
-        {% set totals = hourly.get('totals') or session %}
         {% set win = hourly.get('window') or {} %}
+        {% set totals = win if win.get('opens') is not none else (hourly.get('totals') or session) %}
         <p class="muted" style="margin:12px 0 6px;">
-          Sesión proceso ({{ hourly.get('date', '—') }}) · ventana {{ win.get('start_hour', start_h) }}–{{ win.get('end_hour', end_h) }}hs
+          Sesión proceso ({{ hourly.get('date', '—') }}) · ventana {{ win.get('label') or win_label }}
           · 1 trade / vela M15={{ 'sí' if xauusd_state.get('one_trade_per_bar') else 'no' }}
         </p>
         <div class="kv" style="margin-bottom:8px;">
