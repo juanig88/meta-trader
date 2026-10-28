@@ -1,0 +1,946 @@
+{
+ "periods": {
+  "oos": [
+   "2018-04-01",
+   "2023-08-31"
+  ],
+  "is": [
+   "2023-09-01",
+   "2026-09-30"
+  ]
+ },
+ "assumptions": {
+  "risk_per_unit": "1R = 1% equity, sum_R ~ % equity sin componer",
+  "base": {
+   "name": "replica",
+   "side_mode": "prev_day",
+   "regime": false,
+   "entry_hour": 14,
+   "max_units": 5,
+   "step_atr": 0.1,
+   "k_atr": 0.5,
+   "hold_h": 7.0,
+   "add_window_h": 4.0,
+   "cost_rt": 0.001,
+   "seed": 0
+  }
+ },
+ "variants": {
+  "replica": {
+   "oos": {
+    "sessions": 1977,
+    "units": 7970,
+    "units_per_session": 4.03,
+    "wr_unit": 0.467,
+    "wr_session": 0.364,
+    "pf": 0.93,
+    "sum_R": -162.2,
+    "R_per_session": -0.082,
+    "sharpe": -0.67,
+    "sortino": -1.33,
+    "max_dd_R": -183.4,
+    "yearly_R": {
+     "2018": -68.5,
+     "2019": -22.5,
+     "2020": 16.1,
+     "2021": -58.2,
+     "2022": 28.6,
+     "2023": -57.8
+    },
+    "exits": {
+     "time": 0.629,
+     "tp": 0.203,
+     "sl": 0.168
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1977,
+      "pf": 0.88,
+      "sum_R": -137.8,
+      "sharpe": -1.03,
+      "max_dd_R": -151.5
+     },
+     "ETHUSD": {
+      "sessions": 1975,
+      "pf": 0.98,
+      "sum_R": -24.4,
+      "sharpe": -0.17,
+      "max_dd_R": -71.3
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 1081,
+      "sum_R": -96.5,
+      "R_per_session": -0.089,
+      "wr_session": 0.356
+     },
+     "bull": {
+      "sessions": 1097,
+      "sum_R": -65.7,
+      "R_per_session": -0.06,
+      "wr_session": 0.373
+     }
+    }
+   },
+   "is": {
+    "sessions": 1126,
+    "units": 4965,
+    "units_per_session": 4.41,
+    "wr_unit": 0.466,
+    "wr_session": 0.357,
+    "pf": 0.94,
+    "sum_R": -92.8,
+    "R_per_session": -0.082,
+    "sharpe": -0.57,
+    "sortino": -1.2,
+    "max_dd_R": -109.8,
+    "yearly_R": {
+     "2023": -20.2,
+     "2024": -47.4,
+     "2025": 26.4,
+     "2026": -51.5
+    },
+    "exits": {
+     "time": 0.578,
+     "tp": 0.241,
+     "sl": 0.181
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1126,
+      "pf": 0.89,
+      "sum_R": -87.7,
+      "sharpe": -0.92,
+      "max_dd_R": -95.1
+     },
+     "ETHUSD": {
+      "sessions": 1126,
+      "pf": 0.99,
+      "sum_R": -5.1,
+      "sharpe": -0.06,
+      "max_dd_R": -64.5
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 606,
+      "sum_R": -24.0,
+      "R_per_session": -0.04,
+      "wr_session": 0.348
+     },
+     "bull": {
+      "sessions": 689,
+      "sum_R": -68.8,
+      "R_per_session": -0.1,
+      "wr_session": 0.356
+     }
+    }
+   }
+  },
+  "sin_piramide": {
+   "oos": {
+    "sessions": 1977,
+    "units": 3952,
+    "units_per_session": 2.0,
+    "wr_unit": 0.471,
+    "wr_session": 0.438,
+    "pf": 0.86,
+    "sum_R": -147.5,
+    "R_per_session": -0.075,
+    "sharpe": -1.3,
+    "sortino": -1.94,
+    "max_dd_R": -152.3,
+    "yearly_R": {
+     "2018": -47.8,
+     "2019": -16.4,
+     "2020": -5.2,
+     "2021": -24.1,
+     "2022": -9.1,
+     "2023": -45.0
+    },
+    "exits": {
+     "time": 0.674,
+     "sl": 0.164,
+     "tp": 0.162
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1977,
+      "pf": 0.83,
+      "sum_R": -93.5,
+      "sharpe": -1.44,
+      "max_dd_R": -96.4
+     },
+     "ETHUSD": {
+      "sessions": 1975,
+      "pf": 0.9,
+      "sum_R": -54.0,
+      "sharpe": -0.82,
+      "max_dd_R": -57.2
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 1081,
+      "sum_R": -93.1,
+      "R_per_session": -0.086,
+      "wr_session": 0.435
+     },
+     "bull": {
+      "sessions": 1097,
+      "sum_R": -54.5,
+      "R_per_session": -0.05,
+      "wr_session": 0.451
+     }
+    }
+   },
+   "is": {
+    "sessions": 1126,
+    "units": 2252,
+    "units_per_session": 2.0,
+    "wr_unit": 0.454,
+    "wr_session": 0.41,
+    "pf": 0.83,
+    "sum_R": -115.5,
+    "R_per_session": -0.103,
+    "sharpe": -1.69,
+    "sortino": -2.63,
+    "max_dd_R": -125.2,
+    "yearly_R": {
+     "2023": -16.1,
+     "2024": -55.6,
+     "2025": -24.8,
+     "2026": -19.0
+    },
+    "exits": {
+     "time": 0.61,
+     "tp": 0.201,
+     "sl": 0.19
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1126,
+      "pf": 0.78,
+      "sum_R": -78.5,
+      "sharpe": -1.94,
+      "max_dd_R": -82.4
+     },
+     "ETHUSD": {
+      "sessions": 1126,
+      "pf": 0.89,
+      "sum_R": -37.0,
+      "sharpe": -0.94,
+      "max_dd_R": -47.5
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 606,
+      "sum_R": -38.9,
+      "R_per_session": -0.064,
+      "wr_session": 0.432
+     },
+     "bull": {
+      "sessions": 689,
+      "sum_R": -76.6,
+      "R_per_session": -0.111,
+      "wr_session": 0.418
+     }
+    }
+   }
+  },
+  "replica_regimen": {
+   "oos": {
+    "sessions": 1276,
+    "units": 4248,
+    "units_per_session": 3.33,
+    "wr_unit": 0.476,
+    "wr_session": 0.366,
+    "pf": 0.96,
+    "sum_R": -49.7,
+    "R_per_session": -0.039,
+    "sharpe": -0.28,
+    "sortino": -0.42,
+    "max_dd_R": -82.5,
+    "yearly_R": {
+     "2018": -13.1,
+     "2019": 10.0,
+     "2020": 18.1,
+     "2021": -41.9,
+     "2022": -0.7,
+     "2023": -22.1
+    },
+    "exits": {
+     "time": 0.628,
+     "tp": 0.202,
+     "sl": 0.17
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1032,
+      "pf": 0.88,
+      "sum_R": -71.8,
+      "sharpe": -0.75,
+      "max_dd_R": -76.5
+     },
+     "ETHUSD": {
+      "sessions": 1055,
+      "pf": 1.04,
+      "sum_R": 22.1,
+      "sharpe": 0.2,
+      "max_dd_R": -44.0
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 621,
+      "sum_R": -72.0,
+      "R_per_session": -0.116,
+      "wr_session": 0.337
+     },
+     "bull": {
+      "sessions": 677,
+      "sum_R": 22.3,
+      "R_per_session": 0.033,
+      "wr_session": 0.394
+     }
+    }
+   },
+   "is": {
+    "sessions": 759,
+    "units": 2708,
+    "units_per_session": 3.57,
+    "wr_unit": 0.457,
+    "wr_session": 0.347,
+    "pf": 0.92,
+    "sum_R": -65.2,
+    "R_per_session": -0.086,
+    "sharpe": -0.52,
+    "sortino": -0.87,
+    "max_dd_R": -86.0,
+    "yearly_R": {
+     "2023": -8.2,
+     "2024": -23.1,
+     "2025": -1.8,
+     "2026": -32.1
+    },
+    "exits": {
+     "time": 0.565,
+     "tp": 0.246,
+     "sl": 0.189
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 612,
+      "pf": 0.85,
+      "sum_R": -66.5,
+      "sharpe": -0.93,
+      "max_dd_R": -71.9
+     },
+     "ETHUSD": {
+      "sessions": 603,
+      "pf": 1.0,
+      "sum_R": 1.3,
+      "sharpe": 0.02,
+      "max_dd_R": -41.5
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 351,
+      "sum_R": 4.1,
+      "R_per_session": 0.012,
+      "wr_session": 0.339
+     },
+     "bull": {
+      "sessions": 431,
+      "sum_R": -69.3,
+      "R_per_session": -0.161,
+      "wr_session": 0.346
+     }
+    }
+   }
+  },
+  "largos_en_bull": {
+   "oos": {
+    "sessions": 1097,
+    "units": 4118,
+    "units_per_session": 3.75,
+    "wr_unit": 0.496,
+    "wr_session": 0.401,
+    "pf": 1.0,
+    "sum_R": -4.3,
+    "R_per_session": -0.004,
+    "sharpe": -0.02,
+    "sortino": -0.03,
+    "max_dd_R": -99.5,
+    "yearly_R": {
+     "2018": -1.2,
+     "2019": 26.4,
+     "2020": 60.0,
+     "2021": -40.7,
+     "2022": -7.1,
+     "2023": -41.7
+    },
+    "exits": {
+     "time": 0.625,
+     "tp": 0.2,
+     "sl": 0.175
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 948,
+      "pf": 0.95,
+      "sum_R": -27.4,
+      "sharpe": -0.28,
+      "max_dd_R": -68.4
+     },
+     "ETHUSD": {
+      "sessions": 1045,
+      "pf": 1.04,
+      "sum_R": 23.1,
+      "sharpe": 0.21,
+      "max_dd_R": -41.4
+     }
+    },
+    "by_regime": {
+     "bull": {
+      "sessions": 1097,
+      "sum_R": -4.3,
+      "R_per_session": -0.004,
+      "wr_session": 0.401
+     }
+    }
+   },
+   "is": {
+    "sessions": 689,
+    "units": 2668,
+    "units_per_session": 3.87,
+    "wr_unit": 0.466,
+    "wr_session": 0.366,
+    "pf": 0.84,
+    "sum_R": -135.6,
+    "R_per_session": -0.197,
+    "sharpe": -1.15,
+    "sortino": -1.66,
+    "max_dd_R": -174.5,
+    "yearly_R": {
+     "2023": -10.1,
+     "2024": -44.4,
+     "2025": -75.9,
+     "2026": -5.1
+    },
+    "exits": {
+     "time": 0.585,
+     "tp": 0.208,
+     "sl": 0.207
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 679,
+      "pf": 0.85,
+      "sum_R": -73.4,
+      "sharpe": -1.04,
+      "max_dd_R": -87.4
+     },
+     "ETHUSD": {
+      "sessions": 530,
+      "pf": 0.83,
+      "sum_R": -62.2,
+      "sharpe": -0.98,
+      "max_dd_R": -90.5
+     }
+    },
+    "by_regime": {
+     "bull": {
+      "sessions": 689,
+      "sum_R": -135.6,
+      "R_per_session": -0.197,
+      "wr_session": 0.366
+     }
+    }
+   }
+  },
+  "siempre_largo": {
+   "oos": {
+    "sessions": 1977,
+    "units": 7911,
+    "units_per_session": 4.0,
+    "wr_unit": 0.486,
+    "wr_session": 0.385,
+    "pf": 0.98,
+    "sum_R": -53.2,
+    "R_per_session": -0.027,
+    "sharpe": -0.21,
+    "sortino": -0.43,
+    "max_dd_R": -104.5,
+    "yearly_R": {
+     "2018": -72.6,
+     "2019": 21.7,
+     "2020": 81.9,
+     "2021": -25.9,
+     "2022": -30.9,
+     "2023": -27.4
+    },
+    "exits": {
+     "time": 0.641,
+     "tp": 0.192,
+     "sl": 0.167
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1977,
+      "pf": 0.92,
+      "sum_R": -82.1,
+      "sharpe": -0.61,
+      "max_dd_R": -88.9
+     },
+     "ETHUSD": {
+      "sessions": 1977,
+      "pf": 1.03,
+      "sum_R": 28.9,
+      "sharpe": 0.2,
+      "max_dd_R": -44.0
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 1081,
+      "sum_R": -48.8,
+      "R_per_session": -0.045,
+      "wr_session": 0.372
+     },
+     "bull": {
+      "sessions": 1097,
+      "sum_R": -4.3,
+      "R_per_session": -0.004,
+      "wr_session": 0.401
+     }
+    }
+   },
+   "is": {
+    "sessions": 1126,
+    "units": 4934,
+    "units_per_session": 4.38,
+    "wr_unit": 0.473,
+    "wr_session": 0.369,
+    "pf": 0.88,
+    "sum_R": -177.2,
+    "R_per_session": -0.157,
+    "sharpe": -1.08,
+    "sortino": -2.16,
+    "max_dd_R": -209.8,
+    "yearly_R": {
+     "2023": -23.5,
+     "2024": -39.1,
+     "2025": -94.8,
+     "2026": -19.8
+    },
+    "exits": {
+     "time": 0.601,
+     "tp": 0.207,
+     "sl": 0.192
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1126,
+      "pf": 0.88,
+      "sum_R": -95.2,
+      "sharpe": -1.06,
+      "max_dd_R": -106.9
+     },
+     "ETHUSD": {
+      "sessions": 1126,
+      "pf": 0.89,
+      "sum_R": -82.0,
+      "sharpe": -0.93,
+      "max_dd_R": -113.8
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 606,
+      "sum_R": -41.6,
+      "R_per_session": -0.069,
+      "wr_session": 0.375
+     },
+     "bull": {
+      "sessions": 689,
+      "sum_R": -135.6,
+      "R_per_session": -0.197,
+      "wr_session": 0.366
+     }
+    }
+   }
+  },
+  "entrada_00utc": {
+   "oos": {
+    "sessions": 1979,
+    "units": 7548,
+    "units_per_session": 3.81,
+    "wr_unit": 0.416,
+    "wr_session": 0.301,
+    "pf": 0.83,
+    "sum_R": -337.2,
+    "R_per_session": -0.17,
+    "sharpe": -1.51,
+    "sortino": -3.06,
+    "max_dd_R": -337.6,
+    "yearly_R": {
+     "2018": -39.7,
+     "2019": -6.8,
+     "2020": -132.8,
+     "2021": -101.5,
+     "2022": 5.8,
+     "2023": -62.2
+    },
+    "exits": {
+     "time": 0.722,
+     "tp": 0.165,
+     "sl": 0.112
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1979,
+      "pf": 0.82,
+      "sum_R": -176.2,
+      "sharpe": -1.42,
+      "max_dd_R": -176.7
+     },
+     "ETHUSD": {
+      "sessions": 1977,
+      "pf": 0.84,
+      "sum_R": -161.0,
+      "sharpe": -1.23,
+      "max_dd_R": -167.1
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 1082,
+      "sum_R": -108.9,
+      "R_per_session": -0.101,
+      "wr_session": 0.316
+     },
+     "bull": {
+      "sessions": 1098,
+      "sum_R": -228.3,
+      "R_per_session": -0.208,
+      "wr_session": 0.297
+     }
+    }
+   },
+   "is": {
+    "sessions": 1126,
+    "units": 4237,
+    "units_per_session": 3.76,
+    "wr_unit": 0.409,
+    "wr_session": 0.307,
+    "pf": 0.73,
+    "sum_R": -316.0,
+    "R_per_session": -0.281,
+    "sharpe": -2.58,
+    "sortino": -4.94,
+    "max_dd_R": -319.8,
+    "yearly_R": {
+     "2023": -27.0,
+     "2024": -108.5,
+     "2025": -121.3,
+     "2026": -59.3
+    },
+    "exits": {
+     "time": 0.741,
+     "tp": 0.148,
+     "sl": 0.111
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1126,
+      "pf": 0.69,
+      "sum_R": -186.5,
+      "sharpe": -2.63,
+      "max_dd_R": -186.5
+     },
+     "ETHUSD": {
+      "sessions": 1126,
+      "pf": 0.78,
+      "sum_R": -129.5,
+      "sharpe": -1.89,
+      "max_dd_R": -137.8
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 606,
+      "sum_R": -111.2,
+      "R_per_session": -0.184,
+      "wr_session": 0.312
+     },
+     "bull": {
+      "sessions": 689,
+      "sum_R": -204.8,
+      "R_per_session": -0.297,
+      "wr_session": 0.308
+     }
+    }
+   }
+  },
+  "replica_costo_x2": {
+   "oos": {
+    "sessions": 1977,
+    "units": 7970,
+    "units_per_session": 4.03,
+    "wr_unit": 0.436,
+    "wr_session": 0.327,
+    "pf": 0.8,
+    "sum_R": -490.8,
+    "R_per_session": -0.248,
+    "sharpe": -2.08,
+    "sortino": -3.92,
+    "max_dd_R": -505.8,
+    "yearly_R": {
+     "2018": -105.7,
+     "2019": -80.8,
+     "2020": -50.1,
+     "2021": -101.8,
+     "2022": -29.4,
+     "2023": -123.1
+    },
+    "exits": {
+     "time": 0.629,
+     "tp": 0.203,
+     "sl": 0.168
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1977,
+      "pf": 0.74,
+      "sum_R": -322.5,
+      "sharpe": -2.46,
+      "max_dd_R": -332.8
+     },
+     "ETHUSD": {
+      "sessions": 1975,
+      "pf": 0.86,
+      "sum_R": -168.3,
+      "sharpe": -1.18,
+      "max_dd_R": -176.8
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 1081,
+      "sum_R": -249.2,
+      "R_per_session": -0.231,
+      "wr_session": 0.32
+     },
+     "bull": {
+      "sessions": 1097,
+      "sum_R": -241.6,
+      "R_per_session": -0.22,
+      "wr_session": 0.344
+     }
+    }
+   },
+   "is": {
+    "sessions": 1126,
+    "units": 4965,
+    "units_per_session": 4.41,
+    "wr_unit": 0.433,
+    "wr_session": 0.316,
+    "pf": 0.78,
+    "sum_R": -357.1,
+    "R_per_session": -0.317,
+    "sharpe": -2.23,
+    "sortino": -4.44,
+    "max_dd_R": -363.3,
+    "yearly_R": {
+     "2023": -52.9,
+     "2024": -123.0,
+     "2025": -56.0,
+     "2026": -125.3
+    },
+    "exits": {
+     "time": 0.578,
+     "tp": 0.241,
+     "sl": 0.181
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1126,
+      "pf": 0.72,
+      "sum_R": -242.2,
+      "sharpe": -2.61,
+      "max_dd_R": -244.7
+     },
+     "ETHUSD": {
+      "sessions": 1126,
+      "pf": 0.85,
+      "sum_R": -114.9,
+      "sharpe": -1.29,
+      "max_dd_R": -125.6
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 606,
+      "sum_R": -147.2,
+      "R_per_session": -0.243,
+      "wr_session": 0.304
+     },
+     "bull": {
+      "sessions": 689,
+      "sum_R": -209.9,
+      "R_per_session": -0.305,
+      "wr_session": 0.319
+     }
+    }
+   }
+  },
+  "regimen_costo_x2": {
+   "oos": {
+    "sessions": 1276,
+    "units": 4248,
+    "units_per_session": 3.33,
+    "wr_unit": 0.448,
+    "wr_session": 0.332,
+    "pf": 0.83,
+    "sum_R": -222.2,
+    "R_per_session": -0.174,
+    "sharpe": -1.27,
+    "sortino": -1.84,
+    "max_dd_R": -230.9,
+    "yearly_R": {
+     "2018": -32.7,
+     "2019": -22.6,
+     "2020": -20.2,
+     "2021": -64.8,
+     "2022": -30.6,
+     "2023": -51.2
+    },
+    "exits": {
+     "time": 0.628,
+     "tp": 0.202,
+     "sl": 0.17
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 1032,
+      "pf": 0.74,
+      "sum_R": -167.0,
+      "sharpe": -1.77,
+      "max_dd_R": -171.5
+     },
+     "ETHUSD": {
+      "sessions": 1055,
+      "pf": 0.91,
+      "sum_R": -55.1,
+      "sharpe": -0.51,
+      "max_dd_R": -68.2
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 621,
+      "sum_R": -148.6,
+      "R_per_session": -0.239,
+      "wr_session": 0.301
+     },
+     "bull": {
+      "sessions": 677,
+      "sum_R": -73.6,
+      "R_per_session": -0.109,
+      "wr_session": 0.365
+     }
+    }
+   },
+   "is": {
+    "sessions": 759,
+    "units": 2708,
+    "units_per_session": 3.57,
+    "wr_unit": 0.427,
+    "wr_session": 0.314,
+    "pf": 0.77,
+    "sum_R": -209.2,
+    "R_per_session": -0.276,
+    "sharpe": -1.72,
+    "sortino": -2.68,
+    "max_dd_R": -219.2,
+    "yearly_R": {
+     "2023": -27.9,
+     "2024": -64.4,
+     "2025": -46.3,
+     "2026": -70.6
+    },
+    "exits": {
+     "time": 0.565,
+     "tp": 0.246,
+     "sl": 0.189
+    },
+    "by_symbol": {
+     "BTCUSD": {
+      "sessions": 612,
+      "pf": 0.69,
+      "sum_R": -151.3,
+      "sharpe": -2.17,
+      "max_dd_R": -154.0
+     },
+     "ETHUSD": {
+      "sessions": 603,
+      "pf": 0.87,
+      "sum_R": -57.9,
+      "sharpe": -0.83,
+      "max_dd_R": -77.6
+     }
+    },
+    "by_regime": {
+     "bear": {
+      "sessions": 351,
+      "sum_R": -62.0,
+      "R_per_session": -0.177,
+      "wr_session": 0.308
+     },
+     "bull": {
+      "sessions": 431,
+      "sum_R": -147.2,
+      "R_per_session": -0.342,
+      "wr_session": 0.309
+     }
+    }
+   }
+  },
+  "azar_x20": {
+   "oos": {
+    "sum_R_mean": -246.2,
+    "sum_R_p05_p95": [
+     -391.7,
+     -132.9
+    ],
+    "pf_mean": 0.89,
+    "sharpe_mean": -0.97
+   },
+   "is": {
+    "sum_R_mean": -184.8,
+    "sum_R_p05_p95": [
+     -272.4,
+     -74.3
+    ],
+    "pf_mean": 0.88,
+    "sharpe_mean": -1.1
+   }
+  }
+ },
+ "fidelity_vs_sfe": {
+  "months": 37,
+  "corr_monthly": -0.08,
+  "sfe_sum_gain_pct": 143.9,
+  "replica_sum_R": -92.8
+ },
+ "buy_hold_pct": {
+  "BTCUSD_oos": 294.3,
+  "BTCUSD_is": 222.5,
+  "ETHUSD_oos": 332.9,
+  "ETHUSD_is": 62.7
+ }
+}

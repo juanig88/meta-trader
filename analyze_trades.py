@@ -72,6 +72,8 @@ _STRUCTURED_EVENTS = {
     "TIGHT_TRAIL",
     "FILTER_EXIT",
     "BAR_EXHAUSTION_SKIP",
+    "DUMP_LOCK_SKIP",
+    "LOT_SIZE_SKIP",
     "RATE_LIMIT_SKIP",
     "QUIET_SESSION_SKIP",
     "CORRELATION_SKIP",
@@ -662,12 +664,23 @@ def analyze_log(
     since: Optional[datetime] = None,
     until: Optional[datetime] = None,
     top_n: int = 20,
+    symbols: Optional[set[str]] = None,
 ) -> dict:
     """
     High-level entry point: read a log file and return the summary dict.
     Raises FileNotFoundError if the log does not exist.
+
+    ``symbols`` keeps events with no symbol and drops any other broker's names.
     """
     events = list(iter_events(log_path, since=since, until=until))
+    if symbols:
+        allowed = {str(s).strip().upper() for s in symbols if str(s).strip()}
+        events = [
+            ev
+            for ev in events
+            if not str(ev.get("symbol") or "").strip()
+            or str(ev.get("symbol")).strip().upper() in allowed
+        ]
     enrich_trade_closes_from_logged_opens(events)
     trades = build_trades(events)
     summary = compute_summary(events, trades, top_n=top_n)
@@ -749,6 +762,7 @@ def render_summary(events: list[dict], trades: list[Trade], top_n: int) -> dict:
         "TIGHT_TRAIL",
         "FILTER_EXIT",
         "BAR_EXHAUSTION_SKIP",
+        "DUMP_LOCK_SKIP",
         "QUIET_SESSION_SKIP",
         "CORRELATION_SKIP",
         "PORTFOLIO_REBALANCE",

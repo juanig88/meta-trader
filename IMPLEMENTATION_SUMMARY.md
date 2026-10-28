@@ -1,5 +1,7 @@
 # XAUUSD Parallel Strategy Implementation Summary
 
+> **Not the live bot.** Since 2026-10-07 production is the daily Donchian 20/10 + SMA200 **swing** on XBTFX demo (`trading/docs/SWING_ENGINE.md`); the crypto rotation is stopped. This file is a historical XAU work log.
+
 ## Task Overview
 Implement critical fixes for the XAUUSD parallel trading strategy based on performance analysis showing:
 - Net PnL: -$55.39 (balance dropped from ~$182.58 to $127.23)

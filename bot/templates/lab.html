@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="10" />
+    <title>Lab / Alpha · MT5 Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <style>
+      .metric-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap:10px; }
+      .metric { background:#111827; border:1px solid #1f2a44; border-radius:10px; padding:10px 12px; }
+      .metric .label { color:#94a3b8; font-size:12px; }
+      .metric .value { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:18px; margin-top:4px; }
+      .legend { color:#94a3b8; font-size:13px; line-height:1.55; }
+      .legend strong { color:#e5e7eb; }
+      .dir-buy { color:#4ade80; font-weight:600; }
+      .dir-sell { color:#f87171; font-weight:600; }
+      .dir-none { color:#94a3b8; }
+      .bar-track {
+        position:relative; height:10px; background:#1f2a44; border-radius:999px; overflow:hidden;
+      }
+      .bar-mid { position:absolute; left:50%; top:0; bottom:0; width:1px; background:#64748b; }
+      .bar-fill {
+        position:absolute; top:0; bottom:0; width:8px; margin-left:-4px;
+        background:#38bdf8; border-radius:999px;
+      }
+      .bar-fill.buy { background:#22c55e; }
+      .bar-fill.sell { background:#ef4444; }
+      table th { color:#94a3b8; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; }
+      .num { font-family: ui-monospace, Menlo, Consolas, monospace; }
+      .neg { color:#f87171; }
+      .pos { color:#4ade80; }
+      .sug { border:1px solid #1f2a44; border-radius:10px; padding:10px 12px; margin-top:10px; background:#0b1220; }
+      .sug.hint { border-color:#334155; }
+      .sug.discuss { border-color:#d97706; }
+      .sug.ready { border-color:#22c55e; }
+      .badge { display:inline-block; font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; padding:2px 7px; border-radius:999px; }
+      .badge.hint { background:#1f2937; color:#94a3b8; }
+      .badge.discuss { background:#422006; color:#fbbf24; }
+      .badge.ready { background:#052e16; color:#4ade80; }
+      .share { width:100%; min-height:110px; margin-top:8px; padding:10px; border-radius:8px; border:1px solid #334155; background:#0b1220; color:#e5e7eb; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; line-height:1.45; }
+    </style>
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>{% if rotation_on %}Lab · 5 módulos{% else %}Lab · cinta de mercado y alpha sombra{% endif %}</h1>
+        <div class="muted">
+          {% if rotation_on %}
+            Cada fila es un símbolo. 4/5 del mismo lado dispara, sujeto a veto M15 / pullback / RSI en rango / Murphy clímax / ranking IMX·VEC. Skip <span class="mono">veto_htf</span> / <span class="mono">sin_pullback</span> / <span class="mono">rsi_rango</span> / <span class="mono">murphy_climax</span> / <span class="mono">rank_tail</span> / <span class="mono">spread_caro</span> / <span class="mono">spread_cubre_stop</span>. Esto no opera.
+          {% else %}
+            Esto no opera. Solo muestra lo que guardan el daemon y el alpha engine.
+          {% endif %}
+          · {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (refresh 10s)
+        </div>
+        <div class="muted" style="margin-top:6px;">
+          <a href="/">← Dashboard</a>
+          &nbsp;|&nbsp;
+          <a href="/positions">Posiciones</a>
+          &nbsp;|&nbsp;
+          <a href="/journal">Journal</a>
+          {% if not rotation_on %}
+          &nbsp;|&nbsp;
+          <a href="/miner">Minero manual</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="pill">{% if rotation_on %}{{ (ensemble_live.get("execution_mode") or "ROTACIÓN") }}{% elif snap.ok %}Postgres ok{% else %}Postgres down{% endif %}</div>
+    </div>
+
+    {% if kill_switch and kill_switch.get("halt_active") %}
+    <div class="card warn">
+      <strong>Kill switch: halt activo</strong>
+      ({{ kill_switch.get("reason") or "—" }} desde {{ kill_switch.get("since") or "—" }}).
+      No abre hasta clear manual: borrar <span class="mono">kill_switch.halt</span> o crear <span class="mono">kill_switch.clear</span>.
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2>4/5 recientes: enviados y resultado</h2>
+      <p class="muted" style="margin-top:0;">
+        Últimos {{ fires_n }} disparos 4/5 de trades.log. Alpha y Murphy son telemetría; el score no es una probabilidad.
+        Cinta = desbalance de ticks antes de la decisión (+ compra, − venta).
+      </p>
+      {% if fires_skip_counts %}
+      <div style="margin-bottom:10px;">
+        {% for reason, n in fires_skip_counts %}
+          <span class="badge hint">{{ reason }} · {{ n }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if not fires_sent %}
+      <div class="muted">Ningún 4/5 enviado en la ventana.</div>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Hora</th><th>Símbolo</th><th>Lado</th><th>Acción</th><th>Alpha</th><th>Murphy</th>
+            <th>Cinta</th><th>Spread USD</th><th>Cierre</th><th>Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in fires_sent %}
+          <tr>
+            <td class="num">{{ (r.ts or "")[11:19] }}</td>
+            <td class="mono">{{ r.symbol }}</td>
+            <td>{% if r.side == "BUY" %}<span class="dir-buy">BUY</span>{% elif r.side == "SELL" %}<span class="dir-sell">SELL</span>{% else %}—{% endif %}</td>
+            <td>{{ r.action }}{% if r.reason %} <span class="muted">· {{ r.reason }}</span>{% endif %}</td>
+            <td class="num">{{ r.alpha_code or "—" }}{% if r.alpha_score is not none %} · {{ "%.3f"|format(r.alpha_score) }}{% endif %}</td>
+            <td>{{ r.murphy_tag or "—" }}{% if r.murphy_veto %} <span class="neg">(veto)</span>{% endif %}</td>
+            <td class="num">{% if r.tape_imbalance is not none %}{{ "%+.2f"|format(r.tape_imbalance) }}{% else %}—{% endif %}</td>
+            <td class="num">{% if r.spread_usd is not none %}{{ "%.4f"|format(r.spread_usd) }}{% else %}—{% endif %}</td>
+            <td>{{ r.close_how or "—" }}</td>
+            <td class="num {% if r.net is not none and r.net|float < 0 %}neg{% elif r.net is not none and r.net|float > 0 %}pos{% endif %}">
+              {% if r.net is not none %}{{ "%.4f"|format(r.net|float) }}{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Detalle de votos (ensamble)</h2>
+      <p class="muted" style="margin-top:0;">
+        {% if ensemble_live and ensemble_live.get("execution_mode") == "DEMO_XBTFX" %}
+          DEMO XBTFX: <span class="mono">LIVE</span> es una orden en la cuenta demo.
+        {% elif ensemble_live and ensemble_live.get("dry_run") %}
+          SIM: señales sí, <span class="mono">order_send</span> no.
+        {% elif ensemble_live and ensemble_live.get("execution_mode") == "BLOCKED" %}
+          BLOQUEADO ({{ ensemble_live.get("execution_reason") or "gate" }}).
+        {% endif %}
+        Preferimos Postgres si hay filas; si no, el último ciclo en bot_state.
+      </p>
+      {% set ens_rows = lab_vote_rows or [] %}
+      {% if not ens_rows %}
+      <div class="muted">Sin votos todavía. Con el bot en rotación aparecen acá.</div>
+      {% else %}
+      {% for row in ens_rows %}
+        {% set c = row.get("consensus") or {} %}
+        {% set votes = row.get("votes") or [] %}
+        <div style="margin:12px 0;padding:10px 0;border-top:1px solid #1f2a44;">
+          <div>
+            <span class="mono">{{ row.get("symbol") }}</span>
+            ·
+            {% if (c.get("direction") or row.get("direction")) == "BUY" %}<span class="dir-buy">BUY</span>
+            {% elif (c.get("direction") or row.get("direction")) == "SELL" %}<span class="dir-sell">SELL</span>
+            {% else %}<span class="dir-none">NONE</span>{% endif %}
+            · {{ c.get("buy", row.get("buy", 0)) }}/5 BUY · {{ c.get("sell", row.get("sell", 0)) }}/5 SELL
+            · {{ row.get("action") or "—" }}
+            {% if row.get("skip_reason") %}<span class="muted"> · {{ row.get("skip_reason") }}</span>{% endif %}
+          </div>
+          <div style="margin-top:8px;">
+            {% for v in votes %}
+              {% set side = v.get("side") or "NONE" %}
+              <span class="badge {% if side == 'BUY' %}ready{% elif side == 'SELL' %}discuss{% else %}hint{% endif %}" title="{{ v.get('reason') or '' }}">
+                {{ v.get("label") or v.get("name") }} · {{ side }}
+              </span>
+            {% endfor %}
+            {% if not votes %}
+              <span class="muted">Sin el detalle de 5 módulos en esta fila (están en disparos / near-miss o en Postgres).</span>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+
+    {% if not rotation_on %}
+
+    {% set recent = recent_pnl or {} %}
+    <div class="card">
+      <h2>Cierres de la cuenta ({{ recent.window_label or "momento cero" }})</h2>
+      <div class="legend" style="margin-bottom:12px;">
+        Historial <strong>real del bróker</strong> desde el momento cero (bot + lo que abriste a mano mirando el score).
+        No incluye el 23 ni antes. Ganadora = net &gt; 0 (profit + swap + comisión).
+      </div>
+      {% if not recent.get("ok") %}
+      <div class="muted">No pude leer MT5. {{ recent.get("error") or "¿El terminal está abierto?" }}</div>
+      {% else %}
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="label">Ganadoras</div>
+          <div class="value pos">{{ recent.n_wins or 0 }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Perdedoras</div>
+          <div class="value neg">{{ recent.n_losses or 0 }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Realizado</div>
+          <div class="value {% if recent.realized_net >= 0 %}pos{% else %}neg{% endif %}">{{ "%.2f"|format(recent.realized_net or 0) }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Bot / manual</div>
+          <div class="value" style="font-size:14px;">{{ "%.2f"|format(recent.bot_realized_net or 0) }} / {{ "%.2f"|format(recent.manual_realized_net or 0) }}</div>
+        </div>
+      </div>
+      {% if not recent.closed %}
+      <div class="muted" style="margin-top:12px;">No hay DEAL de cierre en esta ventana.</div>
+      {% else %}
+      <table style="margin-top:12px;">
+        <thead>
+          <tr>
+            <th>Cierre</th>
+            <th>Símbolo</th>
+            <th>Lado</th>
+            <th>Origen</th>
+            <th>Net</th>
+            <th>Comentario</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recent.closed %}
+          <tr>
+            <td class="muted mono">{{ row.time[5:16] if row.time else "—" }}</td>
+            <td class="mono">{{ row.symbol }}</td>
+            <td class="dir-{{ row.side|lower }}">{{ row.side }}</td>
+            <td class="muted">{{ row.origin }}</td>
+            <td class="num {% if row.net >= 0 %}pos{% else %}neg{% endif %}">{{ "%.2f"|format(row.net) }}</td>
+            <td class="muted">{{ row.comment }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    {% set losers = snap.losers or {} %}
+    <div class="card">
+      <h2>Perdedoras vs alpha y velas</h2>
+      <div class="legend" style="margin-bottom:12px;">
+        Solo cierres desde el <strong>momento cero (24/09/2026)</strong>. Se calculan solos (cierre + score + 12 velas M15).
+        <strong>No cambian el bot.</strong> Copiá el recuadro y pegalo acá: decidimos juntos si tocamos algo.
+      </div>
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="label">Perdedoras (log)</div>
+          <div class="value">{{ losers.n or 0 }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Ganadoras (log)</div>
+          <div class="value pos">{{ losers.n_wins or 0 }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Suma de verdes (log)</div>
+          <div class="value pos">{{ "%.2f"|format(losers.sum_wins or 0) }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Suma de rojas</div>
+          <div class="value neg">{{ "%.2f"|format(losers.sum_net or 0) }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">¿Alcanza para tocar el bot?</div>
+          <div class="value" style="font-size:14px;">
+            {% if losers.ready %}Sí, hay muestra{% else %}No, faltan {{ (losers.min_n or 15) - (losers.n or 0) }}{% endif %}
+          </div>
+        </div>
+      </div>
+      {% if losers.tally %}
+      <div class="muted" style="margin-top:10px;">
+        Alpha habría evitado: <strong>{{ losers.tally.alpha_habria_evitado or 0 }}</strong>
+        · Alpha igual que el bot: <strong>{{ losers.tally.alpha_igual or 0 }}</strong>
+        · Alpha al revés: <strong>{{ losers.tally.alpha_contrario or 0 }}</strong>
+        · Sin score cerca: <strong>{{ losers.tally.sin_alpha or 0 }}</strong>
+      </div>
+      {% endif %}
+
+      <div style="margin-top:16px;">
+        <h2 style="margin-bottom:4px;">Sugerencias (no se aplican solas)</h2>
+        <div class="legend">Pista = 1–4 del mismo patrón. Para decidir = 5–14. Lista para acordar = ≥ {{ losers.min_n or 15 }}. Ninguna escribe el .env ni manda órdenes.</div>
+        {% if not losers.suggestions %}
+        <div class="muted" style="margin-top:10px;">
+          {% if (losers.n or 0) == 0 %}
+          Cuando cierre una perdedora, acá va a aparecer “mirá esto” solo.
+          {% else %}
+          Hay rojas, pero ningún patrón llega a pista todavía.
+          {% endif %}
+        </div>
+        {% else %}
+          {% for sug in losers.suggestions %}
+          <div class="sug {{ sug.severity }}">
+            <div><span class="badge {{ sug.severity }}">{{ sug.severity_label }}</span> <strong>{{ sug.title }}</strong></div>
+            <div class="muted" style="margin-top:6px;">{{ sug.why }}</div>
+            <div style="margin-top:6px;">{{ sug.proposal }}</div>
+          </div>
+          {% endfor %}
+        {% endif %}
+        <div class="muted" style="margin-top:12px;">Para el chat — seleccioná y copiá:</div>
+        <textarea class="share" readonly onclick="this.select()">{{ losers.share_text or "" }}</textarea>
+      </div>
+      {% if not losers.rows %}
+      <div class="muted" style="margin-top:12px;">Todavía no hay <span class="mono">TRADE_CLOSE</span> en rojo en <span class="mono">trades.log</span>. Cuando cierre una perdedora, aparece acá sola.</div>
+      {% else %}
+      <table style="margin-top:12px;">
+        <thead>
+          <tr>
+            <th>Cierre</th>
+            <th>Símbolo</th>
+            <th>Lado</th>
+            <th>Net</th>
+            <th>Motivo</th>
+            <th>¿El alpha la habría evitado?</th>
+            <th>¿Qué hizo el precio después?</th>
+            <th>Señal bot</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in losers.rows %}
+          <tr>
+            <td class="muted mono">{{ row.closed_at[5:16] if row.closed_at else "—" }}</td>
+            <td class="mono">{{ row.symbol }}</td>
+            <td class="dir-{{ row.side|lower }}">{{ row.side }}</td>
+            <td class="num neg">{{ "%.2f"|format(row.net) }}</td>
+            <td class="muted">{{ row.reason_label }}</td>
+            <td>{{ row.alpha_label }}{% if row.alpha_score is not none %} <span class="muted num">({{ "%.2f"|format(row.alpha_score) }})</span>{% endif %}</td>
+            <td>{{ row.path_label }}</td>
+            <td class="mono muted">{{ row.signal_skip or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      {% if losers.win_rows %}
+      <h2 style="margin-top:20px;">Ganadoras del log (TRADE_CLOSE del bot)</h2>
+      <table style="margin-top:8px;">
+        <thead>
+          <tr>
+            <th>Cierre</th>
+            <th>Símbolo</th>
+            <th>Lado</th>
+            <th>Net</th>
+            <th>Motivo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in losers.win_rows %}
+          <tr>
+            <td class="muted mono">{{ row.closed_at[5:16] if row.closed_at else "—" }}</td>
+            <td class="mono">{{ row.symbol }}</td>
+            <td class="dir-{{ row.side|lower }}">{{ row.side }}</td>
+            <td class="num pos">{{ "%.2f"|format(row.net) }}</td>
+            <td class="muted">{{ row.reason_label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+
+    {% if not snap.ok %}
+    <div class="card warn">
+      <strong>No hay conexión a la base.</strong>
+      <div style="margin-top:8px;">{{ snap.error or "Postgres no disponible." }}</div>
+      <div class="muted" style="margin-top:8px;">
+        Levantá <span class="mono">docker compose --env-file .env -f infra/docker-compose.yml up -d</span>
+        y <span class="mono">py mt5_tick_daemon.py</span>. El bot de trading no depende de esto.
+        Las perdedoras de arriba salen de <span class="mono">trades.log</span>; sin Docker no hay cruce con alpha/velas.
+      </div>
+    </div>
+    {% else %}
+
+    <div class="card">
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="label">Ticks guardados</div>
+          <div class="value">{{ snap.counts.ticks }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Velas guardadas</div>
+          <div class="value">{{ snap.counts.bars }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Scores escritos</div>
+          <div class="value">{{ snap.counts.scores }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Base</div>
+          <div class="value" style="font-size:12px;word-break:break-all;">{{ snap.pg }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card legend">
+      <strong>Cómo leerlo.</strong>
+      El <strong>score</strong> va de −1 (vende) a +1 (compra).
+      <strong>Neutro</strong> = el modelo no supera el umbral (0.15) o el costo (spread) se come el edge.
+      <strong>net_edge</strong> está en <em>points del bróker</em>, no en dólares: es |score| × ATR menos costos.
+      No es una predicción de ganancia. Momentum = tendencia; z-score = “no persigas”; flow = volumen / desequilibrio bid-ask.
+    </div>
+
+    <div class="card">
+      <h2>Último score por símbolo</h2>
+      {% if not snap.latest %}
+      <div class="muted">Todavía no hay filas en <span class="mono">alpha_scores</span>. Corré <span class="mono">py -m trading.application.alpha_engine</span>.</div>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Símbolo</th>
+            <th>Señal</th>
+            <th>Score</th>
+            <th style="width:140px;"></th>
+            <th>Mom</th>
+            <th>Z</th>
+            <th>Flow</th>
+            <th>Net edge</th>
+            <th>Hora</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in snap.latest %}
+          <tr>
+            <td class="mono">{{ row.symbol }}</td>
+            <td class="dir-{{ row.direction|lower }}">{{ row.direction_label }}</td>
+            <td class="num">{{ "%.3f"|format(row.score) }}</td>
+            <td>
+              <div class="bar-track">
+                <div class="bar-mid"></div>
+                <div class="bar-fill {{ row.direction|lower }}" style="left: {{ row.score_pct }}%;"></div>
+              </div>
+            </td>
+            <td class="num">{{ "%.2f"|format(row.momentum) if row.momentum is not none else "—" }}</td>
+            <td class="num">{{ "%.2f"|format(row.zscore) if row.zscore is not none else "—" }}</td>
+            <td class="num">{{ "%.2f"|format(row.flow) if row.flow is not none else "—" }}</td>
+            <td class="num {% if row.net_edge is not none and row.net_edge < 0 %}neg{% elif row.net_edge is not none and row.net_edge > 0 %}pos{% endif %}">
+              {{ "%.1f"|format(row.net_edge) if row.net_edge is not none else "—" }}
+            </td>
+            <td class="muted mono">{{ row.ts[11:19] if row.ts else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Ticks (últimos 48h)</h2>
+        {% if not snap.ticks %}
+        <div class="muted">Sin ticks. ¿Está corriendo el daemon?</div>
+        {% else %}
+        <table>
+          <thead>
+            <tr><th>Símbolo</th><th>Cantidad</th><th>Bid / Ask</th><th>Último</th></tr>
+          </thead>
+          <tbody>
+            {% for t in snap.ticks %}
+            <tr>
+              <td class="mono">{{ t.symbol }}</td>
+              <td class="num">{{ t.count }}</td>
+              <td class="num">
+                {% if t.bid is not none and t.ask is not none %}
+                  {{ t.bid }} / {{ t.ask }}
+                {% else %}—{% endif %}
+              </td>
+              <td class="muted mono">{{ t.last_ts[11:19] if t.last_ts else "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Velas M1 / M15</h2>
+        {% if not snap.bars %}
+        <div class="muted">Sin velas todavía.</div>
+        {% else %}
+        <table>
+          <thead>
+            <tr><th>Símbolo</th><th>TF</th><th>Cantidad</th><th>Cierre</th></tr>
+          </thead>
+          <tbody>
+            {% for b in snap.bars %}
+            <tr>
+              <td class="mono">{{ b.symbol }}</td>
+              <td class="mono">{{ b.timeframe }}</td>
+              <td class="num">{{ b.count }}</td>
+              <td class="num">{{ b.close if b.close is not none else "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Historial de scores (más reciente primero)</h2>
+      {% if not snap.history %}
+      <div class="muted">Vacío.</div>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Hora</th>
+            <th>Símbolo</th>
+            <th>Señal</th>
+            <th>Score</th>
+            <th>Net edge</th>
+            <th>Spread cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in snap.history %}
+          <tr>
+            <td class="muted mono">{{ row.ts[11:19] if row.ts else "—" }}</td>
+            <td class="mono">{{ row.symbol }}</td>
+            <td class="dir-{{ row.direction|lower }}">{{ row.direction_label }}</td>
+            <td class="num">{{ "%.3f"|format(row.score) }}</td>
+            <td class="num {% if row.net_edge is not none and row.net_edge < 0 %}neg{% elif row.net_edge is not none and row.net_edge > 0 %}pos{% endif %}">
+              {{ "%.1f"|format(row.net_edge) if row.net_edge is not none else "—" }}
+            </td>
+            <td class="num">{{ "%.1f"|format(row.cost_spread) if row.cost_spread is not none else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+
+    {% if snap.partitions %}
+    <div class="card">
+      <h2>Particiones (días en disco)</h2>
+      <table>
+        <thead>
+          <tr><th>Tabla</th><th>Partición</th><th>Día</th><th>MB</th></tr>
+        </thead>
+        <tbody>
+          {% for p in snap.partitions %}
+          <tr>
+            <td class="mono">{{ p.parent }}</td>
+            <td class="mono">{{ p.child }}</td>
+            <td class="mono">{{ p.day }}</td>
+            <td class="num">{{ p.mb }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% endif %}
+    {% endif %}
+  </body>
+</html>

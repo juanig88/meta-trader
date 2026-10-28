@@ -1,0 +1,47 @@
+# Intradía en Exness: qué se midió (2026-10-27)
+
+Detalle de lo que `ESTABLISHED_FACTS.md` resume en dos líneas. Cuenta demo `Exness-MT5Trial11`, BTCUSDm y ETHUSDm. Nada de esto es vivo.
+
+- **Costo en Exness (2026-10-27, `analyze_exness_cost_vs_move.py`, demo Trial11):**
+  - BTCUSDm: spread 0.008% en ticks y 0.012% en velas M1. Es 0.17x el movimiento mediano a 5 min y 0.10x a 15 min (en XBTFX era 1.3x).
+  - ETHUSDm: spread 0.043%. Es 1.52x a 1 min, 0.68x a 5 min y 0.40x a 15 min.
+  - Swap: largos ~0.022%/día, cortos 0.
+  - El horizonte corto dejó de ser imposible por costo en BTC. Falta una señal con bruto distinto de cero.
+- **Regla Murphy de retroceso en BTC M5/M15: descartada por test pre-registrado** (`PREREG_MURPHY_INTRADIA.md` con enmienda 1, `analyze_murphy_intraday_prereg.py`, Binance 1m con costos de Exness, train hasta 2026-01-31).
+  - M5: n 10352, neto −1.23 bps (IC95 −1.82 a −0.64), PF 0.86. Bruto −0.03 bps (p 0.54).
+  - M15: n 3495, neto −1.55 bps (IC95 −3.22 a +0.20), PF 0.90. Bruto −0.31 bps.
+  - El bruto es cero, igual que los cinco módulos de la rotación: la regla no anticipa dirección. El lado opuesto también pierde. La tenencia mediana es de 3 barras.
+  - El holdout (2026-02 → 09) no se abrió. No hay enmienda 2 sobre estos datos.
+  - Antes de la enmienda la regla no podía disparar en ninguna temporalidad: el régimen menor nunca sale opuesto a la intermedia (0 de 3153 días). Desde 2026-10-27 `murphy_rule` toma la corrección menor como el retroceso entre 0 y 2/3.
+- **"Entrar cuando la tendencia ya se ve": sin persistencia en BTC M5** (`analyze_zigzag_persistence.py`, 2026-10-27). La regla es un zigzag siempre adentro: gira cuando el cierre se aleja θ del extremo. Umbrales fijados antes de correr: 0.15 / 0.25 / 0.5 / 1%. Vara p < 0.0025.
+  - Binance train (hasta 2026-01-31):
+    - el bruto da −0.50 / −0.54 / −0.66 / −1.48 bps por tramo
+    - el neto da −1.70 / −1.76 / −1.96 / −3.05 bps
+    - WR ~35%; ninguno pasa
+  - Exness M5 (2026-05-07 → 10-27, otro feed): lo mismo, con bruto entre −0.3 y −1.6 bps.
+  - El tramo medio supera 2θ (0.48% contra 0.30% con θ 0.15%), pero el exceso se va en el sobrepaso de la vela que dispara el giro. Es lo que da un paseo aleatorio.
+  - En el ejemplo del usuario (24–25/10), el zigzag de 0.25% en tiempo real:
+    - suba de 21:00 a 23:40: entra 22:40 y gana +0.14%
+    - baja de 04:35 a 08:20: entra 05:35 y sale en cero por el rebote de las 07:15; el largo del rebote pierde −0.39%
+    - antes, a las 21:10, el corto "a favor de la baja" pierde −0.33%
+  - En retrospectiva las tendencias se ven. Al momento de entrar no se distinguen de los rebotes.
+- **Operaciones manuales** (`manual_miner.log`, XBTFX, hasta 2026-10-03): 22 en total, 14 ganadoras. BTC: 10 trades, 70% de win rate, neto medio −2.67 USD. Gana seguido y poco, pierde poco seguido y mucho. n < 30: no es evidencia de un patrón.
+- **Flujo agresor de Binance (taker buy/sell) en BTC: descartado por test pre-registrado** (`PREREG_FLUJO_AGRESOR.md`, `analyze_flow_imbalance_prereg.py`, 2026-10-27). Desbalance de 5 o 15 min sobre el percentil 90 móvil, salida a 5/15/30 min, continuación y reversión: 12 celdas con vara p < 0.00083. Ninguna pasa.
+  - Continuación: bruto −0.07 a −0.87 bps; el flujo agresivo **no** sigue.
+  - Reversión: bruto +0.07 a +0.87 bps, creciente con la tenencia; neto −0.34 a −1.11 bps. El mejor (N15/H30) tiene IC95 neto de −0.95 a +0.21. Es real pero menor que el spread de 1.18 bps.
+  - Holdout sin abrir. Bajar el spread no está en nuestras manos; una variante con más tenencia sería una hipótesis nueva.
+- **Libro de órdenes:** `record_binance_book.py` graba BTCUSDT (20 niveles, 1/s) desde 2026-10-27 en `logs/binance/book/`. Se mide con 4–6 semanas de datos, con pre-registro propio.
+- **Reversión corta con guard (idea del usuario): no pasa en el holdout** (`PREREG_REVERSION_CORTA.md`, `analyze_reversal_holdout_prereg.py`, corrida única 2026-10-27, Binance 2026-02 → 09). Va contra el movimiento de 5/15 min cuando supera 1.5× lo normal de esa hora. Guards: no entra si el movimiento pasa 3× lo normal o si ≥ 80% de las velas siguieron el mismo lado. Sale a 15/30 min.
+  - **El bruto es positivo en las 4 celdas: +0.53 a +0.97 bps.** La reversión de corto plazo se replica fuera de muestra, igual que en el flujo agresor (train). Es el único efecto del proyecto que aparece en dos tramos y dos métodos.
+  - El neto da −0.24 a −0.66 bps. El mejor es N5/H30: −0.24, con IC95 de −1.01 a +0.58 y PF 0.98. El spread de 1.18 bps es más grande que el efecto.
+  - Los guards ayudan: sin ellos el neto cae a −0.57 / −1.05 bps. Los trades que sacó el guard de velas seguidas eran los peores (−1.1 a −2.5 bps).
+  - Ya no queda historia limpia de Binance BTC. Las variantes (por ejemplo, tenencia mayor) van solo con datos nuevos: forward o el libro de órdenes.
+- **Ruptura de estructura M5 en Exness** (`EXNESS_STRUCTURE_BREAKOUT_RESEARCH.md`, `analyze_exness_structure_breakout.py`, exploratorio). Cierre fuera del rango de 12 velas, EMA20 a favor y volumen de ticks ≥ 1.2×; sin stop. Exness 2026-08-28 → 10-27.
+  - El bruto es negativo en las tres tenencias: −0.67 / −5.0 / −9.6 bps a 15 / 60 / 240 min. El neto da −1.75 / −6.1 / −10.7, con PF 0.82 / 0.67 / 0.67.
+  - En las ventanas del ejemplo del usuario: 2 ganadoras y 2 perdedoras (las rupturas falsas de las 21:05 y 06:50).
+  - Es coherente con la reversión: seguir la ruptura pierde, porque a 15–240 min el precio tiende a devolver. No se invierte; la reversión ya se probó en el holdout.
+- **El chequeo previo como bot automático: no agrega dirección** (`analyze_checklist_bot.py`, exploratorio, Binance BTC 1m oct-2024 → ene-2026, train ya usado). Cada minuto arma un largo y un corto con stop en el último pivote de M15, TP a 5×, salida a 24 h. Los filtros son los de `pretrade`. Métrica: R neto (riesgo fijo en USD).
+  - Con el chequeo: n 343, WR 22.2%, R +0.055 (IC95 −0.17 a +0.30, p 0.33), PF 1.07.
+  - Al azar, con solo los filtros que no eligen dirección (lote mínimo, ruido, spread): n 1897, WR 22.6%, R +0.022 (p 0.35).
+  - Al azar, sin filtros: R −0.475. Los stops diminutos hacen que el spread se coma el riesgo.
+  - Los filtros de dirección (D1/H4/H1, SMA200, no perseguir) no mejoran al azar. Lo que evita perder son los filtros de costo. No se construye el ejecutor.

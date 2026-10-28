@@ -2,6 +2,8 @@
 
 This document provides troubleshooting steps for common issues encountered with Model Context Protocol (MCP) servers in the AI-powered quantitative trading workspace.
 
+If the **bot** is not voting: check `BOT_ROTATION_ENABLED`, demo XBTFX, and `trades.log` for `ENSEMBLE_CYCLE`. MCP cannot place those orders. Runbook: `trading/docs/ROTATION_ENGINE.md`.
+
 ## Table of Contents
 1. [General Troubleshooting Principles](#general-troubleshooting-principles)
 2. [Vibe Trading MCP Issues](#vibe-trading-mcp-issues)

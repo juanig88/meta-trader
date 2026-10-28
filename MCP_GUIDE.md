@@ -21,6 +21,8 @@ This document provides comprehensive guidance on configuring and using Model Con
 
 Model Context Protocol (MCP) enables AI agents to interact with external tools, data sources, and services in a standardized way. This configuration establishes a comprehensive MCP ecosystem for quantitative trading development, research, and operations.
 
+The **live MT5 bot** in this repo is the crypto **rotation** engine (5 modules, 4/5 + M15 veto, demo XBTFX). MCP here is research/read-only (vibe-trading, ccxt, local snapshot). It does not send rotation orders. Runbook: `trading/docs/ROTATION_ENGINE.md`.
+
 Each MCP server provides specific capabilities that AI agents can leverage based on their roles and responsibilities.
 
 ## Vibe Trading MCP Configuration

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="15" />
+    <title>Minero manual · MT5 Bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <style>
+      .metric-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px; }
+      .metric { background:#111827; border:1px solid #1f2a44; border-radius:10px; padding:10px 12px; }
+      .metric .label { color:#94a3b8; font-size:12px; }
+      .metric .value { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:18px; margin-top:4px; }
+      .legend { color:#94a3b8; font-size:13px; line-height:1.55; }
+      table th { color:#94a3b8; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; }
+      .num { font-family: ui-monospace, Menlo, Consolas, monospace; }
+      .neg { color:#f87171; }
+      .pos { color:#4ade80; }
+      .dir-buy { color:#4ade80; font-weight:600; }
+      .dir-sell { color:#f87171; font-weight:600; }
+      pre.report {
+        white-space: pre-wrap; margin: 0; padding: 12px;
+        border-radius: 8px; border: 1px solid #334155; background: #0b1220;
+        color: #e5e7eb; font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 12px; line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card header">
+      <div>
+        <h1>Minero manual</h1>
+        <div class="muted">
+          Cierres con magic 0 y el último contraste contra el alpha.
+          No opera. · {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (refresh 15s)
+        </div>
+        <div class="muted" style="margin-top:6px;">
+          <a href="/">← Dashboard</a>
+          &nbsp;|&nbsp;
+          <a href="/lab">Lab / Alpha</a>
+          &nbsp;|&nbsp;
+          <a href="/journal">Journal del bot</a>
+        </div>
+      </div>
+      <div class="pill">{% if snap.ok %}Postgres ok{% else %}Postgres down{% endif %}</div>
+    </div>
+
+    {% if not snap.ok %}
+    <div class="card warn">
+      <strong>Sin datos del minero.</strong>
+      <div class="muted" style="margin-top:6px;">{{ snap.error or "Postgres no responde." }}</div>
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="label">Cierres</div>
+          <div class="value">{{ snap.n_trades }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Ganadores</div>
+          <div class="value pos">{{ snap.n_winners }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Perdedores</div>
+          <div class="value neg">{{ snap.n_losers }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Win rate</div>
+          <div class="value">{{ snap.win_rate }}</div>
+        </div>
+      </div>
+      <div class="legend" style="margin-top:12px;">
+        El resumen nuevo aparece cada 10 cierres, o la primera vez que hay 30 ganadores.
+        Un “—” en Z o RVOL significa que todavía no había velas guardadas en esa apertura.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Último resumen</h2>
+      {% if not snap.report %}
+      <div class="muted">Todavía no hay un resumen. El minero lo escribe al cruzar el umbral.</div>
+      {% else %}
+      <div class="legend" style="margin-bottom:10px;">
+        {{ snap.report.ts }} · {{ snap.report.trigger }}
+        · muestra {{ snap.report.n_trades }} ({{ snap.report.n_new }} nuevas)
+        · acuerdo con alpha {{ snap.report.agreement }}
+        · pesos sin cambiar
+      </div>
+      <pre class="report">{{ snap.report.summary }}</pre>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Cierres manuales</h2>
+      {% if not snap.rows %}
+      <div class="muted">La tabla está vacía.</div>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Cierre</th>
+            <th>Símbolo</th>
+            <th>Lado</th>
+            <th>Net</th>
+            <th>Hora</th>
+            <th>Z</th>
+            <th>RVOL</th>
+            <th>Squeeze</th>
+            <th>Alpha</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in snap.rows %}
+          <tr>
+            <td class="muted num">{{ row.closed_at[5:16] if row.closed_at else "—" }}</td>
+            <td class="num">{{ row.symbol }}</td>
+            <td class="dir-{{ row.side|lower }}">{{ row.side }}</td>
+            <td class="num {% if row.net >= 0 %}pos{% else %}neg{% endif %}">{{ row.net_text }}</td>
+            <td class="num">{{ row.hour }}</td>
+            <td class="num">{{ row.zscore }}</td>
+            <td class="num">{{ row.rvol }}</td>
+            <td>{{ row.squeeze }}</td>
+            <td class="dir-{{ row.alpha_direction|lower }}">{{ row.alpha_direction }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+    {% endif %}
+  </body>
+</html>

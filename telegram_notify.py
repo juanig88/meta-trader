@@ -6,9 +6,11 @@ Configuración en `.env`:
   TELEGRAM_CHAT_ID=<tu chat id o id de grupo>
   TELEGRAM_NOTIFY_START=1   # opcional: avisar al conectar (default 1 si hay token+chat)
   TELEGRAM_NOTIFY_STOP=1    # opcional: avisar al detenerse (default 1)
-  TELEGRAM_NOTIFY_TRADE_OPEN=1   # avisar al ejecutar una orden (entrada)
-  TELEGRAM_NOTIFY_TRADE_CLOSE=1  # avisar al cerrar posición (SL/TP/manual, etc.)
-  TELEGRAM_NOTIFY_SESSION_WINDOW=1  # aviso al abrir/cerrar ventana horaria por instrumento
+  TELEGRAM_NOTIFY_TRADE_OPEN=0   # aviso al ejecutar una orden (default 0)
+  TELEGRAM_NOTIFY_TRADE_CLOSE=0  # aviso al cerrar posición (default 0)
+  TELEGRAM_NOTIFY_SESSION_WINDOW=0  # aviso al abrir/cerrar ventana horaria (default 0)
+  TELEGRAM_MANUAL_EXCEPTIONS=1  # leer el chat: un número de orden se agrega a manual_exceptions.txt
+  TELEGRAM_FORWARD_CHANNEL=1  # reenviar señales NUEVA SENAL de SantinoCripto al chat del bot
 
 Si faltan token o chat_id, todas las llamadas son no-op.
 """
@@ -111,6 +113,44 @@ def fetch_recent_chat_hints() -> tuple[bool, str, list[dict]]:
     return True, "", out
 
 
+def fetch_updates(*, offset: Optional[int] = None) -> tuple[bool, str, list]:
+    """Short-poll getUpdates. Does not long-poll, so the trading loop is not blocked.
+
+    Returns (ok, error, updates). Confirming an update is the caller's job: pass
+    offset = last update_id + 1 on the next call.
+    """
+    token = _env("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return False, "Falta TELEGRAM_BOT_TOKEN en .env", []
+
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    body: dict = {"timeout": 0, "allowed_updates": ["message"]}
+    if offset is not None:
+        body["offset"] = int(offset)
+    req_timeout = float(_env("TELEGRAM_TIMEOUT", "12") or "12")
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=max(5.0, req_timeout)) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        data = json.loads(raw) if raw else {}
+        if not data.get("ok"):
+            return False, str(data.get("description") or raw)[:400], []
+        updates = data.get("result") or []
+        if not isinstance(updates, list):
+            return False, "getUpdates result was not a list", []
+        return True, "", [u for u in updates if isinstance(u, dict)]
+    except urllib.error.HTTPError as e:
+        body_txt = (e.read() or b"")[:400].decode("utf-8", errors="replace")
+        return False, f"HTTP {e.code}: {body_txt}", []
+    except Exception as e:
+        return False, str(e)[:400], []
+
+
 def send_message_now(text: str, *, timeout: Optional[float] = None) -> tuple[bool, str]:
     """
     Envía un mensaje de inmediato (sin anti-spam por dedup_key).
@@ -168,6 +208,18 @@ def send_message_now(text: str, *, timeout: Optional[float] = None) -> tuple[boo
     except Exception as e:
         logging.exception("Telegram send failed.")
         return False, str(e)[:400]
+
+
+def notify_kill_switch(text: str) -> tuple[bool, str]:
+    if not telegram_configured() or not env_bool("TELEGRAM_NOTIFY_KILL_SWITCH", False):
+        return False, "disabled"
+    return send_message_now(text)
+
+
+def notify_error(text: str) -> None:
+    if not telegram_configured() or not env_bool("TELEGRAM_NOTIFY_ERROR", False):
+        return
+    notify(text, dedup_key="mt5_link_error", min_interval_sec=180.0)
 
 
 def notify(

@@ -1,0 +1,2 @@
+# Los pre-registros se verifican por SHA-256: guardarlos byte por byte.
+trading/docs/PREREG_*.md -text

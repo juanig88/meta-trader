@@ -49,7 +49,6 @@ class TestSessionWindowTelegram(unittest.TestCase):
             trading_window_sessions=(),
             symbols=("NVDA.NAS",),
             symbol_config={"NVDA.NAS": {"trading_window_sessions": "05:00-12:00"}},
-            xauusd_parallel_enabled=False,
         )
         windows = bot_mt5._instrument_session_windows(cfg)
         self.assertEqual(len(windows), 1)
@@ -67,12 +66,11 @@ class TestSessionWindowTelegram(unittest.TestCase):
 
     def test_notify_start_and_end_edges(self) -> None:
         cfg = Config(
-            xauusd_parallel_enabled=True,
-            xauusd_parallel_symbol="XAUUSD",
-            xauusd_parallel_start_hour=10,
-            xauusd_parallel_end_hour=14,
-            trading_window_enabled=False,
-            symbols=(),
+            trading_window_enabled=True,
+            trading_window_timezone="LOCAL",
+            trading_window_sessions=(),
+            symbols=("NVDA.NAS",),
+            symbol_config={"NVDA.NAS": {"trading_window_sessions": "10:00-14:00"}},
         )
         sent: list[str] = []
 
@@ -89,12 +87,12 @@ class TestSessionWindowTelegram(unittest.TestCase):
             bot_mt5._telegram_notify_session_windows(cfg, datetime(2026, 8, 5, 10, 0))
             self.assertEqual(len(sent), 1)
             self.assertIn("inicio de sesión", sent[0])
-            self.assertIn("XAUUSD (scalper)", sent[0])
+            self.assertIn("NVDA.NAS", sent[0])
             # Still inside — no extra message
             bot_mt5._telegram_notify_session_windows(cfg, datetime(2026, 8, 5, 11, 0))
             self.assertEqual(len(sent), 1)
             # Leave window
-            bot_mt5._telegram_notify_session_windows(cfg, datetime(2026, 8, 5, 14, 0))
+            bot_mt5._telegram_notify_session_windows(cfg, datetime(2026, 8, 5, 14, 1))
             self.assertEqual(len(sent), 2)
             self.assertIn("fin de sesión", sent[1])
 
@@ -114,7 +112,6 @@ class TestSessionWindowTelegram(unittest.TestCase):
             start_hour=11,
             end_hour=16,
             symbols=("EURUSD", "USDJPY"),
-            xauusd_parallel_enabled=False,
         )
         windows = bot_mt5._instrument_session_windows(cfg)
         self.assertEqual(len(windows), 2)

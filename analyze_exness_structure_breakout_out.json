@@ -1,0 +1,641 @@
+{
+  "envia_ordenes": false,
+  "resultados_exploratorios": true,
+  "regla_post_hoc": true,
+  "generated_at_utc": "2026-10-27T19:14:28.115396+00:00",
+  "symbol": "BTCUSDm",
+  "server": "Exness-MT5Trial11",
+  "trade_mode": 0,
+  "period_days_requested": 60,
+  "evaluation_from_utc": "2026-08-28T19:15:00+00:00",
+  "evaluation_to_utc": "2026-10-27T19:05:00+00:00",
+  "bars_m5_total_closed": 20155,
+  "bars_m5_in_evaluation": 17275,
+  "contract": {
+    "point": 0.01,
+    "contract_size": 1.0,
+    "volume_min": 0.01,
+    "median_historical_spread_price": 10.0,
+    "p90_historical_spread_price": 10.0,
+    "commission_included": false,
+    "swap_included": false,
+    "slippage_included": false
+  },
+  "rule": {
+    "signal_timeframe": "M5",
+    "breakout": "close beyond max/min of previous 12 closed M5 bars",
+    "trend_filter": "close on same side of EMA20 and EMA20 slope aligned over 4 bars",
+    "volume_filter": "tick_volume >= 1.2 * mean of previous 20 closed M5 bars",
+    "entry": "next M5 bar open; chart bars assumed bid, historical spread applied once",
+    "exits": "fixed 15m, 60m, and 240m close; one position per horizon",
+    "h4_bias": "last fully closed UTC H4 close relative to EMA20 and EMA20 4-bar slope; diagnostic only",
+    "stop_loss_take_profit": "none; this tests direction persistence, not a finished strategy"
+  },
+  "notes": [
+    "The rule was chosen after seeing the two supplied chart intervals; exclude them from claims of independent validation.",
+    "Results on historical data are exploratory. Confirm only with a future frozen holdout/forward test.",
+    "MT5 OHLC are treated as bid prices. Entry/exit spread is estimated from the corresponding M5 bar spread field.",
+    "Commission, slippage, and swap are not included. UTC date crossings are reported because 4h trades may incur swap.",
+    "Tick volume is broker tick activity, not consolidated BTC exchange volume.",
+    "Historical contract terms can change; report uses current contract_size and volume_min for dollar estimates."
+  ],
+  "horizons": {
+    "15m": {
+      "signals_in_window": 673,
+      "eligible_trades": 485,
+      "signal_dispositions": {
+        "traded": 485,
+        "position_open": 188,
+        "data_gap": 0,
+        "insufficient_future_bars": 0
+      },
+      "overall": {
+        "n": 485,
+        "days_with_trades": 59,
+        "net_mean_bps": -1.747402954123994,
+        "net_median_bps": -4.675628287551415,
+        "net_ci95_bps_day_bootstrap": [
+          -3.72802235082712,
+          0.4299425987159214
+        ],
+        "bootstrap_fraction_mean_le_zero": 0.935,
+        "win_rate": 0.3938144329896907,
+        "profit_factor": 0.8207197396509341,
+        "net_sum_bps": -847.4904327501371,
+        "net_sum_usd_min_lot": -70.43539999999062,
+        "gross_mean_bps": -0.6671775406581812,
+        "spread_cost_mean_bps": 1.0802316459938608,
+        "median_favorable_excursion_price": 86.47000000000116,
+        "median_adverse_excursion_price": 124.1299999999901,
+        "utc_date_crossings_without_swap": 1
+      },
+      "by_side": {
+        "BUY": {
+          "n": 249,
+          "days_with_trades": 57,
+          "net_mean_bps": -1.6381739804549824,
+          "net_median_bps": -3.1990980358801195,
+          "net_ci95_bps_day_bootstrap": [
+            -5.283310952317669,
+            2.4982356976823006
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.8085,
+          "win_rate": 0.3895582329317269,
+          "profit_factor": 0.8271306221943706,
+          "net_sum_bps": -407.9053211332906,
+          "net_sum_usd_min_lot": -34.70999999999651,
+          "gross_mean_bps": -0.5371117892038298,
+          "spread_cost_mean_bps": 1.101074330913949,
+          "median_favorable_excursion_price": 72.40000000000873,
+          "median_adverse_excursion_price": 119.25,
+          "utc_date_crossings_without_swap": 0
+        },
+        "SELL": {
+          "n": 236,
+          "days_with_trades": 57,
+          "net_mean_bps": -1.8626487780374852,
+          "net_median_bps": -5.863569240705239,
+          "net_ci95_bps_day_bootstrap": [
+            -4.469744747802623,
+            0.8824738891181102
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.9045,
+          "win_rate": 0.3983050847457627,
+          "profit_factor": 0.8143303851676654,
+          "net_sum_bps": -439.5851116168465,
+          "net_sum_usd_min_lot": -35.72539999999412,
+          "gross_mean_bps": -0.8044079309638315,
+          "spread_cost_mean_bps": 1.0582408470739368,
+          "median_favorable_excursion_price": 103.6050000000032,
+          "median_adverse_excursion_price": 133.51499999999214,
+          "utc_date_crossings_without_swap": 1
+        }
+      },
+      "by_h4_bias": {
+        "bullish": {
+          "n": 182,
+          "days_with_trades": 32,
+          "net_mean_bps": -0.10352828783000663,
+          "net_median_bps": -4.204046171376502,
+          "net_ci95_bps_day_bootstrap": [
+            -3.9283671516488874,
+            3.908074254392382
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.5225,
+          "win_rate": 0.3956043956043956,
+          "profit_factor": 0.98903934599652,
+          "net_sum_bps": -18.842148385061208,
+          "net_sum_usd_min_lot": -3.0229999999966806,
+          "gross_mean_bps": 0.9914537758519779,
+          "spread_cost_mean_bps": 1.0948859470021193,
+          "median_favorable_excursion_price": 88.77500000000873,
+          "median_adverse_excursion_price": 119.25000000000728,
+          "utc_date_crossings_without_swap": 1
+        },
+        "bearish": {
+          "n": 223,
+          "days_with_trades": 42,
+          "net_mean_bps": -2.7722263052418317,
+          "net_median_bps": -4.89104181680683,
+          "net_ci95_bps_day_bootstrap": [
+            -5.4018439434763685,
+            0.2219099967598461
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.9655,
+          "win_rate": 0.3901345291479821,
+          "profit_factor": 0.716755183170582,
+          "net_sum_bps": -618.2064660689284,
+          "net_sum_usd_min_lot": -49.58819999999527,
+          "gross_mean_bps": -1.706692064215383,
+          "spread_cost_mean_bps": 1.0656115678549438,
+          "median_favorable_excursion_price": 84.86999999999534,
+          "median_adverse_excursion_price": 125.19000000000233,
+          "utc_date_crossings_without_swap": 0
+        },
+        "mixed": {
+          "n": 80,
+          "days_with_trades": 25,
+          "net_mean_bps": -2.630522728701844,
+          "net_median_bps": -4.230282499875323,
+          "net_ci95_bps_day_bootstrap": [
+            -8.586256907098461,
+            3.8052530272884177
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.799,
+          "win_rate": 0.4,
+          "profit_factor": 0.745080763310662,
+          "net_sum_bps": -210.4418182961475,
+          "net_sum_usd_min_lot": -17.824199999998672,
+          "gross_mean_bps": -1.542917051303093,
+          "spread_cost_mean_bps": 1.0876465790123029,
+          "median_favorable_excursion_price": 98.375,
+          "median_adverse_excursion_price": 151.63999999999214,
+          "utc_date_crossings_without_swap": 0
+        },
+        "unknown": {
+          "n": 0
+        }
+      },
+      "example_window_trades": [
+        {
+          "side": "SELL",
+          "signal_close": 80240.02,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80239.98,
+          "exit_bid": 80313.37,
+          "gross_bps": -9.146313346538648,
+          "net_bps": -9.943920723807958,
+          "net_usd_min_lot": -0.797899999999936,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 51.94000000000233,
+          "adverse_excursion_price": 83.58999999999651,
+          "crosses_utc_date": false,
+          "signal_utc": "2026-10-24T21:05:00+00:00",
+          "entry_utc": "2026-10-24T21:10:00+00:00",
+          "exit_utc": "2026-10-24T21:25:00+00:00"
+        },
+        {
+          "side": "BUY",
+          "signal_close": 80723.36,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80730.76999999999,
+          "exit_bid": 80790.78,
+          "gross_bps": 8.22675977527028,
+          "net_bps": 7.433349143085012,
+          "net_usd_min_lot": 0.6001000000000931,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 85.98000000001048,
+          "adverse_excursion_price": 16.04999999998836,
+          "crosses_utc_date": false,
+          "signal_utc": "2026-10-24T23:30:00+00:00",
+          "entry_utc": "2026-10-24T23:35:00+00:00",
+          "exit_utc": "2026-10-24T23:50:00+00:00"
+        },
+        {
+          "side": "SELL",
+          "signal_close": 80611.66,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80608.97,
+          "exit_bid": 80439.86,
+          "gross_bps": 20.979054812386337,
+          "net_bps": 20.185098507027988,
+          "net_usd_min_lot": 1.6271000000000642,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 214.49000000000524,
+          "adverse_excursion_price": 29.869999999995343,
+          "crosses_utc_date": false,
+          "signal_utc": "2026-10-25T05:30:00+00:00",
+          "entry_utc": "2026-10-25T05:35:00+00:00",
+          "exit_utc": "2026-10-25T05:50:00+00:00"
+        },
+        {
+          "side": "SELL",
+          "signal_close": 80394.85,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80389.17,
+          "exit_bid": 80503.59,
+          "gross_bps": -14.233260525018267,
+          "net_bps": -15.029387665029061,
+          "net_usd_min_lot": -1.2081999999999244,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 15.720000000001164,
+          "adverse_excursion_price": 133.72999999999593,
+          "crosses_utc_date": false,
+          "signal_utc": "2026-10-25T06:50:00+00:00",
+          "entry_utc": "2026-10-25T06:55:00+00:00",
+          "exit_utc": "2026-10-25T07:10:00+00:00"
+        }
+      ]
+    },
+    "60m": {
+      "signals_in_window": 673,
+      "eligible_trades": 385,
+      "signal_dispositions": {
+        "traded": 385,
+        "position_open": 288,
+        "data_gap": 0,
+        "insufficient_future_bars": 0
+      },
+      "overall": {
+        "n": 385,
+        "days_with_trades": 59,
+        "net_mean_bps": -6.086709207880322,
+        "net_median_bps": -7.831504885176702,
+        "net_ci95_bps_day_bootstrap": [
+          -10.65007803428117,
+          -1.3818512202876092
+        ],
+        "bootstrap_fraction_mean_le_zero": 0.995,
+        "win_rate": 0.412987012987013,
+        "profit_factor": 0.665969654333829,
+        "net_sum_bps": -2343.3830450339237,
+        "net_sum_usd_min_lot": -190.2024999999933,
+        "gross_mean_bps": -5.009011681909169,
+        "spread_cost_mean_bps": 1.077909783894946,
+        "median_favorable_excursion_price": 160.85000000000582,
+        "median_adverse_excursion_price": 216.4100000000035,
+        "utc_date_crossings_without_swap": 16
+      },
+      "by_side": {
+        "BUY": {
+          "n": 194,
+          "days_with_trades": 57,
+          "net_mean_bps": -5.248563255624864,
+          "net_median_bps": -4.9244889503618605,
+          "net_ci95_bps_day_bootstrap": [
+            -12.089549810520463,
+            2.4703192666414506
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.9295,
+          "win_rate": 0.4329896907216495,
+          "profit_factor": 0.7104579127537162,
+          "net_sum_bps": -1018.2212715912237,
+          "net_sum_usd_min_lot": -86.15449999999764,
+          "gross_mean_bps": -4.150054300863173,
+          "spread_cost_mean_bps": 1.0989301882699716,
+          "median_favorable_excursion_price": 143.6550000000061,
+          "median_adverse_excursion_price": 192.5350000000035,
+          "utc_date_crossings_without_swap": 7
+        },
+        "SELL": {
+          "n": 191,
+          "days_with_trades": 57,
+          "net_mean_bps": -6.938019756244502,
+          "net_median_bps": -9.827592727011663,
+          "net_ci95_bps_day_bootstrap": [
+            -12.754253983525766,
+            -0.9933316531573252
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.989,
+          "win_rate": 0.39267015706806285,
+          "profit_factor": 0.6212545329633914,
+          "net_sum_bps": -1325.1617734427,
+          "net_sum_usd_min_lot": -104.04799999999567,
+          "gross_mean_bps": -5.881460540144372,
+          "spread_cost_mean_bps": 1.0565592161004174,
+          "median_favorable_excursion_price": 178.00999999999476,
+          "median_adverse_excursion_price": 238.72000000000116,
+          "utc_date_crossings_without_swap": 9
+        }
+      },
+      "by_h4_bias": {
+        "bullish": {
+          "n": 141,
+          "days_with_trades": 32,
+          "net_mean_bps": -2.620699112927782,
+          "net_median_bps": -3.7220298613188634,
+          "net_ci95_bps_day_bootstrap": [
+            -10.748089438071853,
+            7.073982265630277
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.7265,
+          "win_rate": 0.4397163120567376,
+          "profit_factor": 0.8484132883329976,
+          "net_sum_bps": -369.51857492281727,
+          "net_sum_usd_min_lot": -32.87799999999785,
+          "gross_mean_bps": -1.5234553509731166,
+          "spread_cost_mean_bps": 1.097436054510463,
+          "median_favorable_excursion_price": 173.0799999999872,
+          "median_adverse_excursion_price": 188.0399999999936,
+          "utc_date_crossings_without_swap": 7
+        },
+        "bearish": {
+          "n": 181,
+          "days_with_trades": 42,
+          "net_mean_bps": -11.059838178726794,
+          "net_median_bps": -12.606256967886125,
+          "net_ci95_bps_day_bootstrap": [
+            -17.177755647492212,
+            -5.190078553341369
+          ],
+          "bootstrap_fraction_mean_le_zero": 1.0,
+          "win_rate": 0.3701657458563536,
+          "profit_factor": 0.46524370707527,
+          "net_sum_bps": -2001.83071034955,
+          "net_sum_usd_min_lot": -158.53529999999606,
+          "gross_mean_bps": -9.999613733056087,
+          "spread_cost_mean_bps": 1.0606274471410553,
+          "median_favorable_excursion_price": 131.22999999999593,
+          "median_adverse_excursion_price": 227.3799999999901,
+          "utc_date_crossings_without_swap": 9
+        },
+        "mixed": {
+          "n": 63,
+          "days_with_trades": 24,
+          "net_mean_bps": 0.44390857521339044,
+          "net_median_bps": -2.386215434425916,
+          "net_ci95_bps_day_bootstrap": [
+            -7.367058031521952,
+            9.795051664761287
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.461,
+          "win_rate": 0.47619047619047616,
+          "profit_factor": 1.0335180600337772,
+          "net_sum_bps": 27.966240238443596,
+          "net_sum_usd_min_lot": 1.2108000000005992,
+          "gross_mean_bps": 1.5280602005608102,
+          "spread_cost_mean_bps": 1.083860558429332,
+          "median_favorable_excursion_price": 227.6200000000099,
+          "median_adverse_excursion_price": 245.08000000000175,
+          "utc_date_crossings_without_swap": 0
+        },
+        "unknown": {
+          "n": 0
+        }
+      },
+      "example_window_trades": [
+        {
+          "side": "SELL",
+          "signal_close": 80240.02,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80239.98,
+          "exit_bid": 80345.21,
+          "gross_bps": -13.114410048458446,
+          "net_bps": -13.912017425727756,
+          "net_usd_min_lot": -1.1163000000000467,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 51.94000000000233,
+          "adverse_excursion_price": 153.13000000000466,
+          "crosses_utc_date": false,
+          "signal_utc": "2026-10-24T21:05:00+00:00",
+          "entry_utc": "2026-10-24T21:10:00+00:00",
+          "exit_utc": "2026-10-24T22:10:00+00:00"
+        },
+        {
+          "side": "BUY",
+          "signal_close": 80723.36,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80730.76999999999,
+          "exit_bid": 80794.55,
+          "gross_bps": 8.693781072556847,
+          "net_bps": 7.900333416863656,
+          "net_usd_min_lot": 0.6378000000001339,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 98.65000000000873,
+          "adverse_excursion_price": 75.76999999998952,
+          "crosses_utc_date": true,
+          "signal_utc": "2026-10-24T23:30:00+00:00",
+          "entry_utc": "2026-10-24T23:35:00+00:00",
+          "exit_utc": "2026-10-25T00:35:00+00:00"
+        },
+        {
+          "side": "SELL",
+          "signal_close": 80611.66,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80608.97,
+          "exit_bid": 80513.88,
+          "gross_bps": 11.796453918217352,
+          "net_bps": 11.002497612859006,
+          "net_usd_min_lot": 0.8869000000000233,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 214.49000000000524,
+          "adverse_excursion_price": 29.869999999995343,
+          "crosses_utc_date": false,
+          "signal_utc": "2026-10-25T05:30:00+00:00",
+          "entry_utc": "2026-10-25T05:35:00+00:00",
+          "exit_utc": "2026-10-25T06:35:00+00:00"
+        },
+        {
+          "side": "SELL",
+          "signal_close": 80394.85,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80389.17,
+          "exit_bid": 80580.13,
+          "gross_bps": -23.754443540094567,
+          "net_bps": -24.550570680105366,
+          "net_usd_min_lot": -1.9736000000000058,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 15.720000000001164,
+          "adverse_excursion_price": 237.70999999999185,
+          "crosses_utc_date": false,
+          "signal_utc": "2026-10-25T06:50:00+00:00",
+          "entry_utc": "2026-10-25T06:55:00+00:00",
+          "exit_utc": "2026-10-25T07:55:00+00:00"
+        }
+      ]
+    },
+    "240m": {
+      "signals_in_window": 673,
+      "eligible_trades": 209,
+      "signal_dispositions": {
+        "traded": 209,
+        "position_open": 463,
+        "data_gap": 0,
+        "insufficient_future_bars": 1
+      },
+      "overall": {
+        "n": 209,
+        "days_with_trades": 59,
+        "net_mean_bps": -10.72009093754425,
+        "net_median_bps": -11.400426251800045,
+        "net_ci95_bps_day_bootstrap": [
+          -21.449629344772298,
+          0.06188449355224332
+        ],
+        "bootstrap_fraction_mean_le_zero": 0.9725,
+        "win_rate": 0.41148325358851673,
+        "profit_factor": 0.6706182604640111,
+        "net_sum_bps": -2240.499005946748,
+        "net_sum_usd_min_lot": -185.77039999999573,
+        "gross_mean_bps": -9.644082969607894,
+        "spread_cost_mean_bps": 1.0765076055922282,
+        "median_favorable_excursion_price": 305.2299999999959,
+        "median_adverse_excursion_price": 411.8299999999872,
+        "utc_date_crossings_without_swap": 34
+      },
+      "by_side": {
+        "BUY": {
+          "n": 106,
+          "days_with_trades": 54,
+          "net_mean_bps": -11.04448214823246,
+          "net_median_bps": -12.59290883986429,
+          "net_ci95_bps_day_bootstrap": [
+            -30.086034503843866,
+            8.210008971326529
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.8715,
+          "win_rate": 0.42452830188679247,
+          "profit_factor": 0.6957206854124054,
+          "net_sum_bps": -1170.7151077126407,
+          "net_sum_usd_min_lot": -100.52099999999875,
+          "gross_mean_bps": -9.943608940151417,
+          "spread_cost_mean_bps": 1.1018583427041353,
+          "median_favorable_excursion_price": 307.92499999999563,
+          "median_adverse_excursion_price": 418.6649999999936,
+          "utc_date_crossings_without_swap": 6
+        },
+        "SELL": {
+          "n": 103,
+          "days_with_trades": 56,
+          "net_mean_bps": -10.386251439166086,
+          "net_median_bps": -10.329277930272733,
+          "net_ci95_bps_day_bootstrap": [
+            -21.48306598102402,
+            0.7849014764487301
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.9645,
+          "win_rate": 0.39805825242718446,
+          "profit_factor": 0.6379300706449115,
+          "net_sum_bps": -1069.7838982341068,
+          "net_sum_usd_min_lot": -85.24939999999697,
+          "gross_mean_bps": -9.335832941669903,
+          "spread_cost_mean_bps": 1.0504184974964794,
+          "median_favorable_excursion_price": 278.4600000000064,
+          "median_adverse_excursion_price": 410.820000000007,
+          "utc_date_crossings_without_swap": 28
+        }
+      },
+      "by_h4_bias": {
+        "bullish": {
+          "n": 77,
+          "days_with_trades": 30,
+          "net_mean_bps": -5.525725794796187,
+          "net_median_bps": -3.2439749242828113,
+          "net_ci95_bps_day_bootstrap": [
+            -26.724234945428854,
+            14.88403852897473
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.7015,
+          "win_rate": 0.44155844155844154,
+          "profit_factor": 0.844664749596741,
+          "net_sum_bps": -425.4808861993064,
+          "net_sum_usd_min_lot": -37.03569999999833,
+          "gross_mean_bps": -4.424220987098848,
+          "spread_cost_mean_bps": 1.1018473425930324,
+          "median_favorable_excursion_price": 350.34000000001106,
+          "median_adverse_excursion_price": 429.7299999999959,
+          "utc_date_crossings_without_swap": 14
+        },
+        "bearish": {
+          "n": 102,
+          "days_with_trades": 42,
+          "net_mean_bps": -13.421044430279322,
+          "net_median_bps": -13.450142345125053,
+          "net_ci95_bps_day_bootstrap": [
+            -25.040841810140368,
+            -2.333655736904147
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.9915,
+          "win_rate": 0.4019607843137255,
+          "profit_factor": 0.5251736580528418,
+          "net_sum_bps": -1368.9465318884909,
+          "net_sum_usd_min_lot": -109.68269999999787,
+          "gross_mean_bps": -12.361329295918285,
+          "spread_cost_mean_bps": 1.0605675906421645,
+          "median_favorable_excursion_price": 233.31500000000233,
+          "median_adverse_excursion_price": 391.86999999999534,
+          "utc_date_crossings_without_swap": 17
+        },
+        "mixed": {
+          "n": 30,
+          "days_with_trades": 22,
+          "net_mean_bps": -14.869052928631701,
+          "net_median_bps": -19.225010262469453,
+          "net_ci95_bps_day_bootstrap": [
+            -44.19424619642483,
+            22.427346551239992
+          ],
+          "bootstrap_fraction_mean_le_zero": 0.811,
+          "win_rate": 0.36666666666666664,
+          "profit_factor": 0.6219650867693656,
+          "net_sum_bps": -446.07158785895103,
+          "net_sum_usd_min_lot": -39.05199999999954,
+          "gross_mean_bps": -13.803091215259126,
+          "spread_cost_mean_bps": 1.0656649981203807,
+          "median_favorable_excursion_price": 313.5650000000023,
+          "median_adverse_excursion_price": 440.1499999999942,
+          "utc_date_crossings_without_swap": 3
+        },
+        "unknown": {
+          "n": 0
+        }
+      },
+      "example_window_trades": [
+        {
+          "side": "BUY",
+          "signal_close": 80723.36,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80730.76999999999,
+          "exit_bid": 80822.45,
+          "gross_bps": 12.149986429129363,
+          "net_bps": 11.356264779836433,
+          "net_usd_min_lot": 0.9168000000000757,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 192.43000000000757,
+          "adverse_excursion_price": 75.76999999998952,
+          "crosses_utc_date": true,
+          "signal_utc": "2026-10-24T23:30:00+00:00",
+          "entry_utc": "2026-10-24T23:35:00+00:00",
+          "exit_utc": "2026-10-25T03:35:00+00:00"
+        },
+        {
+          "side": "SELL",
+          "signal_close": 80611.66,
+          "h4_bias": "bearish",
+          "status": "traded",
+          "entry_price": 80608.97,
+          "exit_bid": 80106.26,
+          "gross_bps": 62.36402722922851,
+          "net_bps": 61.57007092387016,
+          "net_usd_min_lot": 4.963100000000122,
+          "spread_cost_price": 6.4,
+          "favorable_excursion_price": 613.3800000000047,
+          "adverse_excursion_price": 29.869999999995343,
+          "crosses_utc_date": false,
+          "signal_utc": "2026-10-25T05:30:00+00:00",
+          "entry_utc": "2026-10-25T05:35:00+00:00",
+          "exit_utc": "2026-10-25T09:35:00+00:00"
+        }
+      ]
+    }
+  }
+}

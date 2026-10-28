@@ -1,0 +1,411 @@
+{
+  "design": "auditoria de informacion, pre-registrada; holdout no leido",
+  "split_utc": "2026-02-01",
+  "step_bars": 15,
+  "bars": 559872,
+  "horizons_min": [
+    5,
+    15,
+    60,
+    240,
+    1440
+  ],
+  "bootstrap": 2000,
+  "seed": 20261005,
+  "n_tests": 30,
+  "bonferroni_p": 0.000333,
+  "note": "retorno medio firmado por el voto, sin costos y sin stop (cota superior)",
+  "modules": {
+    "htf": {
+      "vote_rate_pct": 94.5,
+      "by_horizon": {
+        "5": {
+          "n": 528933,
+          "n_days": 486,
+          "mean_bps": -0.219,
+          "ci95_bps": [
+            -0.488,
+            0.036
+          ],
+          "p": 0.088,
+          "hit_rate_pct": 46.45,
+          "pasa": false
+        },
+        "15": {
+          "n": 528933,
+          "n_days": 486,
+          "mean_bps": 0.071,
+          "ci95_bps": [
+            -0.231,
+            0.377
+          ],
+          "p": 0.64,
+          "hit_rate_pct": 47.47,
+          "pasa": false
+        },
+        "60": {
+          "n": 528933,
+          "n_days": 486,
+          "mean_bps": 0.33,
+          "ci95_bps": [
+            -0.793,
+            1.436
+          ],
+          "p": 0.619,
+          "hit_rate_pct": 47.83,
+          "pasa": false
+        },
+        "240": {
+          "n": 528933,
+          "n_days": 486,
+          "mean_bps": 1.808,
+          "ci95_bps": [
+            -2.747,
+            6.315
+          ],
+          "p": 0.425,
+          "hit_rate_pct": 48.69,
+          "pasa": false
+        },
+        "1440": {
+          "n": 528933,
+          "n_days": 486,
+          "mean_bps": 6.332,
+          "ci95_bps": [
+            -10.629,
+            23.478
+          ],
+          "p": 0.495,
+          "hit_rate_pct": 49.0,
+          "pasa": false
+        }
+      }
+    },
+    "momentum_short": {
+      "vote_rate_pct": 15.0,
+      "by_horizon": {
+        "5": {
+          "n": 84185,
+          "n_days": 486,
+          "mean_bps": -0.658,
+          "ci95_bps": [
+            -1.906,
+            0.174
+          ],
+          "p": 0.152,
+          "hit_rate_pct": 47.05,
+          "pasa": false
+        },
+        "15": {
+          "n": 84185,
+          "n_days": 486,
+          "mean_bps": -1.756,
+          "ci95_bps": [
+            -3.492,
+            -0.474
+          ],
+          "p": 0.003,
+          "hit_rate_pct": 47.03,
+          "pasa": false
+        },
+        "60": {
+          "n": 84185,
+          "n_days": 486,
+          "mean_bps": -2.789,
+          "ci95_bps": [
+            -5.536,
+            -0.598
+          ],
+          "p": 0.01,
+          "hit_rate_pct": 47.27,
+          "pasa": false
+        },
+        "240": {
+          "n": 84185,
+          "n_days": 486,
+          "mean_bps": -3.795,
+          "ci95_bps": [
+            -8.007,
+            -0.052
+          ],
+          "p": 0.047,
+          "hit_rate_pct": 48.08,
+          "pasa": false
+        },
+        "1440": {
+          "n": 84185,
+          "n_days": 486,
+          "mean_bps": -3.76,
+          "ci95_bps": [
+            -11.228,
+            3.558
+          ],
+          "p": 0.321,
+          "hit_rate_pct": 49.46,
+          "pasa": false
+        }
+      }
+    },
+    "intermarket": {
+      "vote_rate_pct": 74.4,
+      "by_horizon": {
+        "5": {
+          "n": 416690,
+          "n_days": 486,
+          "mean_bps": -0.5,
+          "ci95_bps": [
+            -0.815,
+            -0.176
+          ],
+          "p": 0.002,
+          "hit_rate_pct": 46.96,
+          "pasa": false
+        },
+        "15": {
+          "n": 416690,
+          "n_days": 486,
+          "mean_bps": -0.636,
+          "ci95_bps": [
+            -1.349,
+            -0.042
+          ],
+          "p": 0.03,
+          "hit_rate_pct": 47.95,
+          "pasa": false
+        },
+        "60": {
+          "n": 416690,
+          "n_days": 486,
+          "mean_bps": -0.748,
+          "ci95_bps": [
+            -1.574,
+            0.128
+          ],
+          "p": 0.086,
+          "hit_rate_pct": 48.16,
+          "pasa": false
+        },
+        "240": {
+          "n": 416690,
+          "n_days": 486,
+          "mean_bps": -0.82,
+          "ci95_bps": [
+            -2.597,
+            0.93
+          ],
+          "p": 0.391,
+          "hit_rate_pct": 49.14,
+          "pasa": false
+        },
+        "1440": {
+          "n": 416690,
+          "n_days": 486,
+          "mean_bps": -1.005,
+          "ci95_bps": [
+            -5.161,
+            3.396
+          ],
+          "p": 0.624,
+          "hit_rate_pct": 49.63,
+          "pasa": false
+        }
+      }
+    },
+    "vol_bands": {
+      "vote_rate_pct": 38.8,
+      "by_horizon": {
+        "5": {
+          "n": 217015,
+          "n_days": 486,
+          "mean_bps": 0.034,
+          "ci95_bps": [
+            -0.576,
+            0.535
+          ],
+          "p": 0.888,
+          "hit_rate_pct": 46.96,
+          "pasa": false
+        },
+        "15": {
+          "n": 217015,
+          "n_days": 486,
+          "mean_bps": -0.534,
+          "ci95_bps": [
+            -1.419,
+            0.195
+          ],
+          "p": 0.181,
+          "hit_rate_pct": 47.18,
+          "pasa": false
+        },
+        "60": {
+          "n": 217015,
+          "n_days": 486,
+          "mean_bps": -0.821,
+          "ci95_bps": [
+            -2.279,
+            0.438
+          ],
+          "p": 0.216,
+          "hit_rate_pct": 47.45,
+          "pasa": false
+        },
+        "240": {
+          "n": 217015,
+          "n_days": 486,
+          "mean_bps": -1.156,
+          "ci95_bps": [
+            -3.368,
+            1.011
+          ],
+          "p": 0.323,
+          "hit_rate_pct": 48.58,
+          "pasa": false
+        },
+        "1440": {
+          "n": 217015,
+          "n_days": 486,
+          "mean_bps": -0.62,
+          "ci95_bps": [
+            -5.667,
+            4.895
+          ],
+          "p": 0.81,
+          "hit_rate_pct": 49.56,
+          "pasa": false
+        }
+      }
+    },
+    "structure": {
+      "vote_rate_pct": 88.4,
+      "by_horizon": {
+        "5": {
+          "n": 494932,
+          "n_days": 486,
+          "mean_bps": 0.021,
+          "ci95_bps": [
+            -0.264,
+            0.285
+          ],
+          "p": 0.892,
+          "hit_rate_pct": 46.82,
+          "pasa": false
+        },
+        "15": {
+          "n": 494932,
+          "n_days": 486,
+          "mean_bps": -0.081,
+          "ci95_bps": [
+            -0.446,
+            0.267
+          ],
+          "p": 0.627,
+          "hit_rate_pct": 47.41,
+          "pasa": false
+        },
+        "60": {
+          "n": 494932,
+          "n_days": 486,
+          "mean_bps": -0.148,
+          "ci95_bps": [
+            -0.933,
+            0.617
+          ],
+          "p": 0.701,
+          "hit_rate_pct": 47.97,
+          "pasa": false
+        },
+        "240": {
+          "n": 494932,
+          "n_days": 486,
+          "mean_bps": 0.243,
+          "ci95_bps": [
+            -1.361,
+            1.83
+          ],
+          "p": 0.8,
+          "hit_rate_pct": 48.95,
+          "pasa": false
+        },
+        "1440": {
+          "n": 494932,
+          "n_days": 486,
+          "mean_bps": 0.148,
+          "ci95_bps": [
+            -3.669,
+            4.311
+          ],
+          "p": 0.954,
+          "hit_rate_pct": 49.7,
+          "pasa": false
+        }
+      }
+    },
+    "consenso_4_5": {
+      "vote_rate_pct": 20.2,
+      "by_horizon": {
+        "5": {
+          "n": 112885,
+          "n_days": 486,
+          "mean_bps": -0.513,
+          "ci95_bps": [
+            -1.501,
+            0.33
+          ],
+          "p": 0.269,
+          "hit_rate_pct": 46.35,
+          "pasa": false
+        },
+        "15": {
+          "n": 112885,
+          "n_days": 486,
+          "mean_bps": -1.212,
+          "ci95_bps": [
+            -2.665,
+            -0.051
+          ],
+          "p": 0.034,
+          "hit_rate_pct": 46.57,
+          "pasa": false
+        },
+        "60": {
+          "n": 112885,
+          "n_days": 486,
+          "mean_bps": -1.795,
+          "ci95_bps": [
+            -4.336,
+            0.441
+          ],
+          "p": 0.13,
+          "hit_rate_pct": 46.24,
+          "pasa": false
+        },
+        "240": {
+          "n": 112885,
+          "n_days": 486,
+          "mean_bps": -1.7,
+          "ci95_bps": [
+            -6.377,
+            2.815
+          ],
+          "p": 0.452,
+          "hit_rate_pct": 47.8,
+          "pasa": false
+        },
+        "1440": {
+          "n": 112885,
+          "n_days": 486,
+          "mean_bps": 0.639,
+          "ci95_bps": [
+            -14.41,
+            16.407
+          ],
+          "p": 0.97,
+          "hit_rate_pct": 48.76,
+          "pasa": false
+        }
+      }
+    }
+  },
+  "pasan_bonferroni": []
+}

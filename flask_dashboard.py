@@ -1,17 +1,20 @@
+"""Local Flask dashboard. Rotation mode: 5 modules / 4/5 + HTF veto (see trading/docs/ROTATION_ENGINE.md)."""
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import telegram_notify
 
-from flask import Flask, redirect, render_template, request, Response, url_for
+from flask import Flask, redirect, render_template, request, url_for
 
-from path_utils import safe_under_root
+from trading.application.account_pnl import lab_epoch_start, mt5_history_end, rotation_epoch_start, summarize_account_pnl
+from trading.domain.rotation_stops import spread_usd_for_lot
+from trading.domain.xbtfx import margin_band
+from trading.infrastructure.xbtfx_session import rejection_reason
 
 try:
     from dotenv import load_dotenv
@@ -22,16 +25,8 @@ except ImportError:
 
 
 STATE_PATH = Path("bot_state.json")
-BACKTEST_PATH = Path("backtest_results.jsonl")
-WALKFORWARD_PATH = Path("walkforward.jsonl")
-SCAN_PATH = Path("scan_results_run.jsonl")
-SCAN_PATH_ALT = Path("scan_results.jsonl")
-PORTFOLIO_RESULTS_PATH = Path("portfolio_results.jsonl")
-PORTFOLIO_GRID_PATH = Path("portfolio_grid.jsonl")
-FORWARD_RESULTS_PATH = Path("forward_results.jsonl")
 
 ROOT = Path(__file__).resolve().parent
-FORWARD_SCRIPT = ROOT / "forward_metrics.py"
 TRADES_LOG_PATH = ROOT / "trades.log"
 _EVAL_EVENT_NAMES = frozenset(
     {
@@ -39,11 +34,6 @@ _EVAL_EVENT_NAMES = frozenset(
         "EVAL_SKIP",
         "EVAL_ENTRY_ATTEMPT",
         "EVAL_TRACKS_BOOT",
-        "XAUUSD_PARALLEL_SKIP",
-        "XAUUSD_PARALLEL_SIGNAL",
-        "XAUUSD_PARALLEL_OPEN",
-        "XAUUSD_PARALLEL_CLOSE",
-        "XAUUSD_PARALLEL_BROKER_CLOSE",
     }
 )
 
@@ -55,7 +45,7 @@ def parse_recent_eval_events(
     max_bytes: int = 400_000,
 ) -> list[dict]:
     """
-    Tail-parse trades.log for EVAL_* / XAUUSD_PARALLEL_* JSON lines (newest last).
+    Tail-parse trades.log for EVAL_* JSON lines (newest last).
     Pure-ish helper (filesystem only) for dashboard + tests.
     """
     log_path = path or TRADES_LOG_PATH
@@ -99,30 +89,6 @@ def parse_recent_eval_events(
 def _tracks_from_env_fallback() -> list[dict]:
     """Si el bot aún no escribió eval_tracks, armar filas desde .env."""
     tracks: list[dict] = []
-    if (os.getenv("BOT_XAUUSD_PARALLEL_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
-        sessions = (os.getenv("BOT_XAUUSD_PARALLEL_SESSIONS") or "").strip()
-        if sessions:
-            window = sessions.replace(",", " · ")
-        else:
-            start_h = int(float(os.getenv("BOT_XAUUSD_PARALLEL_START_HOUR", "10")))
-            end_h = int(float(os.getenv("BOT_XAUUSD_PARALLEL_END_HOUR", "14")))
-            window = f"{start_h:02d}:00-{end_h:02d}:00"
-        tracks.append(
-            {
-                "track": "xau_parallel_breakout",
-                "symbol": (os.getenv("BOT_XAUUSD_PARALLEL_SYMBOL") or "XAUUSD").strip().upper(),
-                "path": "parallel",
-                "window": window,
-                "window_tz": "LOCAL",
-                "lot": float(os.getenv("BOT_XAUUSD_PARALLEL_LOT", "0.01")),
-                "sl_mode": (os.getenv("BOT_XAUUSD_PARALLEL_SL_MODE") or "atr").strip().lower(),
-                "sl_atr_mult": float(os.getenv("BOT_XAUUSD_PARALLEL_SL_ATR_MULT", "1.5")),
-                "tp_rr": float(os.getenv("BOT_XAUUSD_PARALLEL_TP_RR", "2.0")),
-                "adx_min": float(os.getenv("BOT_XAUUSD_PARALLEL_ADX_MIN", "22")),
-                "in_window": None,
-                "source": "env",
-            }
-        )
     raw_syms = (os.getenv("BOT_SYMBOLS") or "").strip()
     symbols = [p.strip() for p in raw_syms.split(",") if p.strip()]
     try:
@@ -279,29 +245,62 @@ def compute_health(state: dict) -> dict:
     return out
 
 
-def _forward_latest_summary() -> dict:
-    """Última corrida útil en home (desde forward_results.jsonl)."""
-    rows = _read_jsonl(FORWARD_RESULTS_PATH)
-    if not rows:
-        return {}
-    last = max(rows, key=lambda r: str(r.get("ts") or ""))
-    b = last.get("baseline") or {}
-    fl = last.get("from_log") or {}
+def _broker_symbols() -> set[str]:
+    """Symbols of the broker we actually trade. Empty set means do not filter."""
     return {
-        "ts": last.get("ts"),
-        "days": last.get("days"),
-        "window_start": last.get("window_start"),
-        "window_end": last.get("window_end"),
-        "magic": last.get("magic"),
-        "symbols": last.get("symbols") or [],
-        "deals_matched": last.get("deals_matched"),
-        "deals_out_matched": last.get("deals_out_matched"),
-        "outs_per_day": last.get("outs_per_day"),
-        "pnl_total": last.get("pnl_total"),
-        "winrate_out_deals": last.get("winrate_out_deals"),
-        "trades_per_day_backtest": b.get("trades_per_day_backtest"),
-        "opens_log": fl.get("opens_matched"),
+        part.strip().upper()
+        for part in (os.getenv("BOT_SYMBOLS") or "").split(",")
+        if part.strip()
     }
+
+
+def _rotation_active(state: dict | None = None) -> bool:
+    st = state if isinstance(state, dict) else get_bot_state()
+    return bool(st.get("rotation_enabled") or st.get("ensemble"))
+
+
+def _trade_universe(state: dict | None = None) -> set[str]:
+    """Symbols the live dashboard should show. Rotation uses bot_state, not BOT_SYMBOLS leftovers."""
+    st = state if isinstance(state, dict) else get_bot_state()
+    if _rotation_active(st):
+        found = {str(s).strip().upper() for s in (st.get("symbols") or []) if str(s).strip()}
+        if found:
+            return found
+        from trading.domain.crypto_universe import CRYPTO_UNIVERSE
+
+        return {str(s).strip().upper() for s in CRYPTO_UNIVERSE if str(s).strip()}
+    return _broker_symbols()
+
+
+def _rotation_magics(state: dict | None = None) -> set[int]:
+    """Single magic the rotation engine sends with. Do not mix eval-track magics into the 60/h count."""
+    st = state if isinstance(state, dict) else get_bot_state()
+    for raw in (st.get("magic"), os.getenv("BOT_MAGIC"), 260414):
+        if raw is None or raw == "":
+            continue
+        try:
+            return {int(float(raw))}
+        except (TypeError, ValueError):
+            continue
+    return {260414}
+
+
+def _lab_vote_rows(ensemble_pg: dict | None, ensemble_live: dict | None) -> list:
+    """PG first if it has vote payloads; else fired/near-miss/module skips from bot_state; else slim chips."""
+    pg = list((ensemble_pg or {}).get("latest") or [])
+    if pg and any((row.get("votes") or []) for row in pg):
+        return pg
+    live = ensemble_live or {}
+    hot = (
+        list(live.get("fired") or [])
+        + list(live.get("near_miss") or [])
+        + list(live.get("module_skips") or [])
+    )
+    if hot:
+        return hot
+    if pg:
+        return pg
+    return list(live.get("symbols") or [])
 
 
 def _short_query_msg(msg: str, max_len: int = 200) -> str:
@@ -311,73 +310,14 @@ def _short_query_msg(msg: str, max_len: int = 200) -> str:
     return s
 
 
-def _market_regime_export_text(state: dict) -> str:
-    """
-    Texto plano para copiar y pegar (p. ej. al asistente) con régimen actual y parches sugeridos.
-    """
-    regimes = state.get("market_regimes") or {}
-    if not isinstance(regimes, dict) or not regimes:
-        return ""
-
-    ts = state.get("ts") or ""
-    lines: list[str] = [
-        "--- market_regime_export (meta-trader) ---",
-        f"bot_state ts: {ts}",
-        "",
-        "Régimen detectado por símbolo:",
-    ]
-    for sym in sorted(regimes.keys()):
-        r = regimes[sym]
-        if not isinstance(r, dict):
-            continue
-        lines.append(f"  {sym}: {r.get('regime', '?')}")
-
-    patches: dict[str, dict] = {}
-    for sym in sorted(regimes.keys()):
-        r = regimes.get(sym)
-        if not isinstance(r, dict):
-            continue
-        p = r.get("suggested_config_patch")
-        if isinstance(p, dict) and p:
-            patches[sym] = p
-
-    lines += [
-        "",
-        "Nota: régimen = telemetría. Los filtros NO se mutan en caliente "
-        "(BOT_MARKET_REGIME_AUTO_APPLY=0 por defecto). "
-        "Lo de abajo es referencia opcional si decidís editar BOT_SYMBOL_CONFIG a mano; "
-        "no borres sl_points/tp_points/ema_*/spreads. Reinicio solo si vos cambiaste .env.",
-        "",
-    ]
-
-    if not patches:
-        lines.append(
-            "(No hay suggested_config_patch en este bot_state: reiniciá el bot con la versión actual "
-            "de market_regime.py para rellenar la referencia.)"
-        )
-        lines.append("--- fin ---")
-        return "\n".join(lines)
-
-    lines.append("REFERENCIA opcional (JSON indentado; NO auto-aplicada):")
-    lines.append(json.dumps(patches, indent=2, ensure_ascii=False))
-    lines.append("")
-    lines.append("REFERENCIA (una línea; solo si editás .env a propósito):")
-    lines.append(json.dumps(patches, separators=(",", ":"), ensure_ascii=False))
-    lines.append("")
-    lines.append("--- fin ---")
-    return "\n".join(lines)
-
-
 @app.get("/")
 def index():
     state = get_bot_state()
     health = compute_health(state)
 
-    # Extraemos la data de XAUUSD Paralelo si existe
-    xauusd_state = state.get("xauusd_parallel", {}) or {}
     parallel_view = build_parallel_tracks_view(state)
 
-    # Last-trade table: símbolos del bot + XAUUSD paralelo + cualquier key en last_trade_time
+    # Last-trade table: símbolos del bot + tracks + cualquier key en last_trade_time
     last_trade_time = state.get("last_trade_time") or {}
     last_trade_symbols: list[str] = []
     seen: set[str] = set()
@@ -386,10 +326,6 @@ def index():
         if s and s not in seen:
             last_trade_symbols.append(s)
             seen.add(s)
-    xau_sym = str(xauusd_state.get("symbol") or "").strip() if xauusd_state.get("enabled") else ""
-    if xau_sym and xau_sym not in seen:
-        last_trade_symbols.append(xau_sym)
-        seen.add(xau_sym)
     for t in parallel_view.get("tracks") or []:
         s = str((t or {}).get("symbol") or "").strip()
         if s and s not in seen:
@@ -401,93 +337,60 @@ def index():
             last_trade_symbols.append(s)
             seen.add(s)
 
+    from trading.application.rotation_metrics import rotation_close_rows, summarize_rotation_closes
+    from trading.domain.crypto_universe import CRYPTO_UNIVERSE
+    from trading.infrastructure.persistence.miner_snapshot import fetch_miner_snapshot
+
+    rotation_on = _rotation_active(state)
+    if rotation_on:
+        rot_since = rotation_epoch_start()
+        today_pnl = _fetch_account_pnl_view(
+            since=rot_since,
+            window_label=f"desde {rot_since.strftime('%Y-%m-%d')} (rotación)",
+        )
+        day_pnl = today_pnl
+        miner = {"ok": False, "error": ""}
+    else:
+        today_pnl = _fetch_account_pnl_view(hours=None)
+        day_pnl = _fetch_account_pnl_view(since=lab_epoch_start())
+        miner = fetch_miner_snapshot(limit=8)
+
+    uni = tuple(str(s).strip() for s in (state.get("symbols") or CRYPTO_UNIVERSE) if str(s).strip())
+    rotation_stats = summarize_rotation_closes(
+        today_pnl.get("closed") or [],
+        today_pnl.get("floating") or [],
+        universe=uni or CRYPTO_UNIVERSE,
+    )
+    rotation_closed = rotation_close_rows(
+        today_pnl.get("closed") or [],
+        universe=uni or CRYPTO_UNIVERSE,
+    )
+    cap = int(
+        state.get("max_opens_per_hour")
+        or (state.get("ensemble") or {}).get("hour_cap")
+        or 60
+    )
+    hourly_opens = _fetch_hourly_opens(
+        cap=cap,
+        magics=_rotation_magics(state) if rotation_on else _managed_bot_magics(state),
+    )
+
     return render_template(
         "index.html",
         state=state,
         health=health,
         now=datetime.now(),
-        forward_latest=_forward_latest_summary(),
-        forward_ok=request.args.get("forward_ok"),
-        forward_err=request.args.get("forward_err", ""),
-        forward_rc=request.args.get("forward_rc", type=int),
         telegram_test=request.args.get("telegram_test", ""),
         telegram_test_msg=request.args.get("telegram_test_msg", ""),
-        regime_export_text=_market_regime_export_text(state),
-        xauusd_state=xauusd_state,
         last_trade_symbols=last_trade_symbols,
         parallel_view=parallel_view,
+        day_pnl=day_pnl,
+        today_pnl=today_pnl,
+        miner=miner,
+        rotation_stats=rotation_stats,
+        rotation_closed=rotation_closed,
+        hourly_opens=hourly_opens,
     )
-
-
-@app.get("/export/market-regime")
-def export_market_regime():
-    """Texto plano: copiar desde navegador o curl para pegar en chat / archivo."""
-    state = get_bot_state()
-    body = _market_regime_export_text(state)
-    if not body.strip():
-        body = "(Sin market_regimes en bot_state.json o bot detenido / estado vacío.)\n"
-    return Response(
-        body,
-        mimetype="text/plain; charset=utf-8",
-        headers={"Content-Disposition": 'inline; filename="market_regime_export.txt"'},
-    )
-
-
-@app.post("/forward/run")
-def forward_run():
-    """
-    Ejecuta forward_metrics.py en un subproceso (nuevo intérprete + MT5).
-    Si el bot live también usa la API MT5 desde Python, puede haber conflicto: en ese caso corré el script a mano.
-    """
-    if not FORWARD_SCRIPT.is_file():
-        return redirect(url_for("index", forward_err="missing_script"))
-
-    raw_days = (request.form.get("days") or "14").strip()
-    try:
-        days = max(1, min(366, int(raw_days)))
-    except ValueError:
-        days = 14
-
-    cmd = [
-        sys.executable,
-        str(FORWARD_SCRIPT),
-        "--days",
-        str(days),
-        "--out",
-        str(ROOT / FORWARD_RESULTS_PATH),
-    ]
-    if TRADES_LOG_PATH.is_file():
-        cmd.extend(["--log-trades", str(TRADES_LOG_PATH)])
-    baseline = ROOT / PORTFOLIO_RESULTS_PATH.name
-    if baseline.is_file():
-        cmd.extend(["--baseline", str(baseline)])
-
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except subprocess.TimeoutExpired:
-        return redirect(url_for("index", forward_err="timeout"))
-    except OSError as e:
-        app.logger.exception("forward/run: could not start subprocess")
-        return redirect(url_for("index", forward_err="os", forward_rc=-1))
-
-    if proc.returncode != 0:
-        app.logger.warning(
-            "forward_metrics exit=%s stderr=%s stdout_tail=%s",
-            proc.returncode,
-            (proc.stderr or "")[:2000],
-            (proc.stdout or "")[-500:],
-        )
-        return redirect(url_for("index", forward_err="nonzero", forward_rc=proc.returncode))
-
-    return redirect(url_for("index", forward_ok="1"))
 
 
 @app.post("/telegram/test")
@@ -520,255 +423,6 @@ def telegram_chat_list():
     )
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    out: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict):
-                out.append(obj)
-        except Exception:
-            continue
-    return out
-
-
-def _jsonl_line_count(path: Path) -> int:
-    if not path.exists():
-        return 0
-    n = 0
-    try:
-        with path.open(encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if line.strip():
-                    n += 1
-    except OSError:
-        return 0
-    return n
-
-
-def _scan_source_path() -> Path:
-    """Prefer scan_results_run.jsonl; fall back to scan_results.jsonl if the first is empty/missing."""
-    if _jsonl_line_count(SCAN_PATH) > 0:
-        return SCAN_PATH
-    if _jsonl_line_count(SCAN_PATH_ALT) > 0:
-        return SCAN_PATH_ALT
-    return SCAN_PATH
-
-
-def _coerce_float(v, default: float = 0.0) -> float:
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
-
-
-def _has_money_row(r: dict) -> bool:
-    return "pnl_money" in r and r.get("pnl_money") is not None
-
-
-def _backtest_files() -> list[Path]:
-    """
-    Candidate backtest JSONL files to show in dashboard.
-    Includes default backtest_results.jsonl, every backtest*.jsonl in project root
-    (new runs like backtest_sl_be_profit_lock.jsonl), and walkforward.jsonl.
-    """
-    files: list[Path] = [BACKTEST_PATH]
-    for p in sorted(ROOT.glob("backtest*.jsonl")):
-        if p.name != BACKTEST_PATH.name:
-            files.append(Path(p.name))
-    files.append(WALKFORWARD_PATH)
-
-    seen: set[str] = set()
-    out: list[Path] = []
-    for p in files:
-        name = p.name
-        if name in seen:
-            continue
-        seen.add(name)
-        out.append(p)
-    return out
-
-
-def _reports_backtest_hub_rows() -> list[tuple[str, str, Path]]:
-    """Human labels and URLs for /reports hub (one row per selectable backtest file)."""
-    rows: list[tuple[str, str, Path]] = []
-    for p in _backtest_files():
-        name = p.name
-        if name == WALKFORWARD_PATH.name:
-            label = "Walk-forward"
-        elif name == BACKTEST_PATH.name:
-            label = "Backtests (default)"
-        elif name.startswith("backtest_ab"):
-            label = f"Backtests A/B ({name})"
-        else:
-            label = f"Backtests ({name})"
-        rows.append((label, f"/backtests?file={name}", Path(name)))
-    return rows
-
-
-def _select_backtest_path() -> Path:
-    """
-    Pick which JSONL to render on /backtests via ?file=filename.jsonl.
-    Defaults to backtest_results.jsonl.
-    """
-    allowed = {p.name for p in _backtest_files()}
-    requested = (request.args.get("file") or "").strip()
-    name = requested or BACKTEST_PATH.name
-    try:
-        return safe_under_root(name, root=ROOT, allowed_names=allowed)
-    except ValueError:
-        return safe_under_root(BACKTEST_PATH.name, root=ROOT, allowed_names=allowed)
-
-
-@app.get("/backtests")
-def backtests():
-    src = _select_backtest_path()
-    rows = _read_jsonl(src)
-    for r in rows:
-        pnl = _coerce_float(r.get("pnl_points"), 0.0)
-        dd = _coerce_float(r.get("max_drawdown_points"), 0.0)  # negative
-        r["_pnl"] = pnl
-        r["_dd"] = dd
-        r["_score"] = pnl + dd  # conservative: drawdown reduces score (dd is negative)
-
-        if _has_money_row(r):
-            pnl_money = _coerce_float(r.get("pnl_money"), 0.0)
-            dd_money = _coerce_float(r.get("max_drawdown_money"), 0.0)  # negative
-            r["_pnl_money"] = pnl_money
-            r["_dd_money"] = dd_money
-            r["_score_money"] = pnl_money + dd_money
-            r["_has_money"] = True
-        else:
-            r["_pnl_money"] = None
-            r["_dd_money"] = None
-            r["_score_money"] = None
-            r["_has_money"] = False
-
-    # sorting via ?sort=score|pnl|dd|winrate|trades (default score)
-    sort_key = (request.args.get("sort") or "score").lower()
-
-    key_map = {
-        "score": lambda r: _coerce_float(r.get("_score"), 0.0),
-        "pnl": lambda r: _coerce_float(r.get("_pnl"), 0.0),
-        "dd": lambda r: _coerce_float(r.get("_dd"), 0.0),
-        "score_money": lambda r: (
-            float("-inf") if not r.get("_has_money") else _coerce_float(r.get("_score_money"), 0.0)
-        ),
-        "pnl_money": lambda r: (
-            float("-inf") if not r.get("_has_money") else _coerce_float(r.get("_pnl_money"), 0.0)
-        ),
-        "dd_money": lambda r: (
-            float("-inf") if not r.get("_has_money") else _coerce_float(r.get("_dd_money"), 0.0)
-        ),
-        "winrate": lambda r: _coerce_float(r.get("winrate"), 0.0),
-        "trades": lambda r: int(_coerce_float(r.get("trades"), 0.0)),
-    }
-    key_fn = key_map.get(sort_key, key_map["score"])
-
-    rows_sorted = sorted(rows, key=key_fn, reverse=True)
-    return render_template(
-        "backtests.html",
-        rows=rows_sorted,
-        now=datetime.now(),
-        file_exists=src.exists(),
-        filename=src.name,
-        files=[p.name for p in _backtest_files()],
-        sort=sort_key,
-    )
-
-
-@app.get("/scans")
-def scans():
-    src = _scan_source_path()
-    rows = _read_jsonl(src)
-    for r in rows:
-        pnl = _coerce_float(r.get("pnl_points"), 0.0)
-        dd = _coerce_float(r.get("max_drawdown_points"), 0.0)
-        r["_score"] = pnl + dd
-    rows_sorted = sorted(rows, key=lambda r: _coerce_float(r.get("_score"), 0.0), reverse=True)
-    return render_template(
-        "scans.html",
-        rows=rows_sorted,
-        now=datetime.now(),
-        file_exists=src.exists(),
-        source_file=src.name,
-    )
-
-
-@app.get("/reports")
-def reports():
-    """Hub: todos los JSONL que el proyecto va generando."""
-    files = _reports_backtest_hub_rows()
-    files.extend(
-        [
-            ("Scan / ranking", "/scans", _scan_source_path()),
-            ("Portfolio backtest", "/portfolio", PORTFOLIO_RESULTS_PATH),
-            ("Portfolio grid search", "/portfolio-grid", PORTFOLIO_GRID_PATH),
-            ("Forward metrics (live)", "/forward", FORWARD_RESULTS_PATH),
-        ]
-    )
-    items = []
-    for label, url, p in files:
-        items.append(
-            {
-                "label": label,
-                "url": url,
-                "filename": p.name,
-                "lines": _jsonl_line_count(p),
-                "exists": p.exists(),
-            }
-        )
-    return render_template("reports.html", items=items, now=datetime.now())
-
-
-@app.get("/portfolio")
-def portfolio():
-    rows = _read_jsonl(PORTFOLIO_RESULTS_PATH)
-    rows_sorted = sorted(rows, key=lambda r: str(r.get("ts") or ""), reverse=True)
-    return render_template(
-        "portfolio.html",
-        rows=rows_sorted,
-        now=datetime.now(),
-        file_exists=PORTFOLIO_RESULTS_PATH.exists(),
-        filename=PORTFOLIO_RESULTS_PATH.name,
-    )
-
-
-@app.get("/portfolio-grid")
-def portfolio_grid():
-    rows = _read_jsonl(PORTFOLIO_GRID_PATH)
-    rows_sorted = sorted(rows, key=lambda r: float(r.get("final_balance") or 0.0), reverse=True)
-    return render_template(
-        "portfolio_grid.html",
-        rows=rows_sorted,
-        now=datetime.now(),
-        file_exists=PORTFOLIO_GRID_PATH.exists(),
-        filename=PORTFOLIO_GRID_PATH.name,
-    )
-
-
-@app.get("/forward")
-def forward():
-    rows = _read_jsonl(FORWARD_RESULTS_PATH)
-    rows_sorted = sorted(rows, key=lambda r: str(r.get("ts") or ""), reverse=True)
-    latest_pretty = ""
-    if rows_sorted:
-        latest_pretty = json.dumps(rows_sorted[0], ensure_ascii=False, indent=2, default=str)
-    return render_template(
-        "forward.html",
-        rows=rows_sorted,
-        latest_pretty=latest_pretty,
-        now=datetime.now(),
-        file_exists=FORWARD_RESULTS_PATH.exists(),
-        filename=FORWARD_RESULTS_PATH.name,
-    )
-
-
 def _mt5_connect_for_readonly() -> tuple[bool, str]:
     """
     Connect this Flask process to MT5 just to read account/positions.
@@ -781,7 +435,8 @@ def _mt5_connect_for_readonly() -> tuple[bool, str]:
         return False, f"MetaTrader5 no instalado: {e}"
 
     if mt5.terminal_info() is not None:
-        return True, ""
+        reason = rejection_reason(mt5)
+        return (False, reason) if reason else (True, "")
 
     login = os.getenv("MT5_LOGIN")
     password = os.getenv("MT5_PASSWORD")
@@ -806,7 +461,188 @@ def _mt5_connect_for_readonly() -> tuple[bool, str]:
         if not ok:
             return False, f"mt5.login falló: {mt5.last_error()}"
 
+    reason = rejection_reason(mt5)
+    if reason:
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+        return False, reason
     return True, ""
+
+
+def _int_attr(obj: object, name: str, default: int = 0) -> int:
+    """Read an int attribute without collapsing 0 via `or`."""
+    raw = getattr(obj, name, default)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _managed_bot_magics(state: dict | None = None) -> set[int]:
+    """Magics the bot owns (main loop + eval tracks). Used to label bot vs manual."""
+    st = state if state is not None else get_bot_state()
+    managed_magics: set[int] = {260414}
+    try:
+        env_magic = os.getenv("BOT_MAGIC")
+        if env_magic:
+            managed_magics.add(int(float(env_magic)))
+    except (TypeError, ValueError):
+        pass
+    et = st.get("eval_tracks") if isinstance(st.get("eval_tracks"), dict) else {}
+    for track in et.get("tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        try:
+            magic = track.get("magic")
+            if magic is not None:
+                managed_magics.add(int(float(magic)))
+        except (TypeError, ValueError):
+            pass
+    return managed_magics
+
+
+def _deal_to_dict(d: object) -> dict:
+    t = _int_attr(d, "time", 0)
+    return {
+        "time": datetime.fromtimestamp(t).isoformat(timespec="seconds") if t > 0 else None,
+        "deal": _int_attr(d, "ticket", 0),
+        "ticket": _int_attr(d, "ticket", 0),
+        "position_id": _int_attr(d, "position_id", 0),
+        "symbol": str(getattr(d, "symbol", "") or ""),
+        "magic": _int_attr(d, "magic", 0),
+        "entry": _int_attr(d, "entry", -1),
+        "type": _int_attr(d, "type", -1),
+        "volume": float(getattr(d, "volume", 0.0) or 0.0),
+        "price": float(getattr(d, "price", 0.0) or 0.0),
+        "profit": float(getattr(d, "profit", 0.0) or 0.0),
+        "swap": float(getattr(d, "swap", 0.0) or 0.0),
+        "commission": float(getattr(d, "commission", 0.0) or 0.0),
+        "reason": _int_attr(d, "reason", -1),
+        "comment": str(getattr(d, "comment", "") or ""),
+    }
+
+
+def _fetch_hourly_opens(*, cap: int, magics: set[int]) -> dict:
+    """Rolling 60m ENTRY_IN deals from the broker, not the in-memory bot counter."""
+    from trading.application.rotation_metrics import summarize_hourly_opens
+
+    now = datetime.now()
+    start = now - timedelta(hours=1)
+    empty = {
+        "ok": False,
+        "error": "",
+        "n": 0,
+        "cap": int(cap),
+        "remaining": int(cap),
+        "at_cap": False,
+        "rows": [],
+        "window_from": start.isoformat(timespec="seconds"),
+        "window_to": now.isoformat(timespec="seconds"),
+        "magics": sorted(int(m) for m in magics),
+    }
+    ok, err = _mt5_connect_for_readonly()
+    if not ok:
+        empty["error"] = err
+        return empty
+    import MetaTrader5 as mt5
+
+    deals = mt5.history_deals_get(start, mt5_history_end(now)) or []
+    rows = [_deal_to_dict(d) for d in deals]
+    out = summarize_hourly_opens(rows, magics=sorted(magics), cap=int(cap))
+    out["error"] = ""
+    out["ok"] = True
+    out["window_from"] = start.isoformat(timespec="seconds")
+    out["window_to"] = now.isoformat(timespec="seconds")
+    out["magics"] = sorted(int(m) for m in magics)
+    return out
+
+
+def _fetch_account_pnl_view(
+    *, hours: float | None = None, since: datetime | None = None, window_label: str | None = None
+) -> dict:
+    """Live MT5 realized+floating snapshot.
+
+    Priority: explicit ``since`` → local midnight if hours is None → last N hours.
+    """
+    empty = {
+        "ok": False,
+        "error": "",
+        "window_label": "hoy",
+        "realized_profit": 0.0,
+        "realized_net": 0.0,
+        "bot_realized_net": 0.0,
+        "manual_realized_net": 0.0,
+        "floating_net": 0.0,
+        "account_net": 0.0,
+        "n_closed": 0,
+        "n_wins": 0,
+        "n_losses": 0,
+        "closed": [],
+        "wins": [],
+        "losses": [],
+        "floating": [],
+        "by_symbol": [],
+    }
+    ok, err = _mt5_connect_for_readonly()
+    if not ok:
+        empty["error"] = err
+        return empty
+
+    import MetaTrader5 as mt5
+
+    now = datetime.now()
+    if since is not None:
+        start = since
+        empty["window_label"] = f"desde {since.strftime('%Y-%m-%d')} (momento cero)"
+    elif hours is None:
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        empty["window_label"] = "hoy (medianoche local)"
+    else:
+        start = now - timedelta(hours=float(hours))
+        empty["window_label"] = f"últimas {int(hours)}h"
+    if window_label:
+        empty["window_label"] = window_label
+
+    deals = mt5.history_deals_get(start, mt5_history_end(now)) or []
+    positions = mt5.positions_get() or []
+    allowed = _trade_universe()
+    pos_rows = []
+    for p in positions:
+        pos_rows.append(
+            {
+                "symbol": str(getattr(p, "symbol", "") or ""),
+                "side": "BUY" if int(getattr(p, "type", 0) or 0) == 0 else "SELL",
+                "profit": float(getattr(p, "profit", 0.0) or 0.0),
+                "swap": float(getattr(p, "swap", 0.0) or 0.0),
+                "magic": int(getattr(p, "magic", 0) or 0),
+            }
+        )
+    deal_rows = [_deal_to_dict(d) for d in deals]
+    if allowed:
+        deal_rows = [
+            row
+            for row in deal_rows
+            if not str(row.get("symbol") or "").strip()
+            or str(row.get("symbol")).strip().upper() in allowed
+        ]
+        pos_rows = [
+            row
+            for row in pos_rows
+            if str(row.get("symbol") or "").strip().upper() in allowed
+        ]
+    summary = summarize_account_pnl(
+        deal_rows,
+        pos_rows,
+        bot_magics=sorted(_managed_bot_magics()),
+    )
+    summary["ok"] = True
+    summary["error"] = ""
+    summary["window_label"] = empty["window_label"]
+    return summary
 
 
 def _fetch_positions_snapshot() -> dict:
@@ -819,28 +655,7 @@ def _fetch_positions_snapshot() -> dict:
 
     state = get_bot_state()
     symbols_filter = [str(s).upper() for s in (state.get("symbols") or [])]
-    xau_st = state.get("xauusd_parallel") or {}
-    if isinstance(xau_st, dict) and xau_st.get("enabled"):
-        xau_sym = str(xau_st.get("symbol") or "XAUUSD").strip().upper()
-        if xau_sym and xau_sym not in symbols_filter:
-            symbols_filter.append(xau_sym)
-    # Magics gestionados: loop + scalper XAU
-    managed_magics: set[int] = set()
-    try:
-        env_magic = os.getenv("BOT_MAGIC")
-        if env_magic:
-            managed_magics.add(int(float(env_magic)))
-    except (TypeError, ValueError):
-        pass
-    try:
-        if xau_st.get("enabled") and xau_st.get("magic") is not None:
-            managed_magics.add(int(float(xau_st.get("magic"))))
-        else:
-            xm = os.getenv("BOT_XAUUSD_PARALLEL_MAGIC")
-            if xm:
-                managed_magics.add(int(float(xm)))
-    except (TypeError, ValueError):
-        pass
+    managed_magics = _managed_bot_magics(state)
 
     acc = mt5.account_info()
     account = None
@@ -848,23 +663,9 @@ def _fetch_positions_snapshot() -> dict:
         balance = float(getattr(acc, "balance", 0.0) or 0.0)
         equity = float(getattr(acc, "equity", 0.0) or 0.0)
         margin = float(getattr(acc, "margin", 0.0) or 0.0)
-        # Margin level % = equity / margin * 100. Undefined when margin == 0
-        # (no open positions requiring collateral). MT5 also exposes
-        # margin_so_call / margin_so_so: stop-out thresholds configured by the
-        # broker (typical demo accounts: 100%/50%).
-        margin_level = (equity / margin * 100.0) if margin > 0 else None
         so_call = float(getattr(acc, "margin_so_call", 0.0) or 0.0) or None
         so_so = float(getattr(acc, "margin_so_so", 0.0) or 0.0) or None
-        if margin_level is None:
-            margin_status = "none"  # no positions, no risk
-        elif so_so and margin_level <= so_so * 1.2:
-            margin_status = "critical"  # within 20% of stop-out
-        elif so_call and margin_level <= so_call:
-            margin_status = "warn"  # below margin-call threshold
-        elif margin_level < 300.0:
-            margin_status = "caution"  # less than 3x equity/margin
-        else:
-            margin_status = "ok"
+        margin_level, margin_status = margin_band(equity, margin, so_call, so_so)
         account = {
             "login": int(getattr(acc, "login", 0) or 0),
             "name": str(getattr(acc, "name", "") or ""),
@@ -891,8 +692,24 @@ def _fetch_positions_snapshot() -> dict:
         digits = int(getattr(sinfo, "digits", 2)) if sinfo is not None else 2
         tick = mt5.symbol_info_tick(sym)
         cur_price = None
+        spread_pts = None
+        spread_usd = None
         if tick is not None:
             cur_price = float(tick.bid if int(getattr(p, "type", 0)) == 1 else tick.ask)
+            bid = float(getattr(tick, "bid", 0.0) or 0.0)
+            ask = float(getattr(tick, "ask", 0.0) or 0.0)
+            point = float(getattr(sinfo, "point", 0.0) or 0.0) if sinfo is not None else 0.0
+            if ask > 0.0 and bid > 0.0 and point > 0.0:
+                spread_pts = (ask - bid) / point
+            if sinfo is not None and ask > 0.0 and bid > 0.0:
+                hole = spread_usd_for_lot(
+                    spread_px=ask - bid,
+                    lot=float(getattr(p, "volume", 0.0) or 0.0),
+                    tick_value=float(getattr(sinfo, "trade_tick_value", 0.0) or 0.0),
+                    tick_size=float(getattr(sinfo, "trade_tick_size", 0.0) or 0.0),
+                )
+                if hole is not None:
+                    spread_usd = round(float(hole), 4)
         try:
             magic = int(getattr(p, "magic", 0) or 0)
         except (TypeError, ValueError):
@@ -910,6 +727,8 @@ def _fetch_positions_snapshot() -> dict:
                 "tp": float(getattr(p, "tp", 0.0) or 0.0),
                 "profit": float(getattr(p, "profit", 0.0) or 0.0),
                 "swap": float(getattr(p, "swap", 0.0) or 0.0),
+                "spread_pts": spread_pts,
+                "spread_usd": spread_usd,
                 "magic": magic,
                 "managed_by_bot": bool(managed),
                 "digits": digits,
@@ -1025,6 +844,8 @@ _EVENT_ORDER = [
     "TIGHT_TRAIL",
     "FILTER_EXIT",
     "BAR_EXHAUSTION_SKIP",
+    "DUMP_LOCK_SKIP",
+    "LOT_SIZE_SKIP",
     "QUIET_SESSION_SKIP",
     "CORRELATION_SKIP",
     "PORTFOLIO_REBALANCE",
@@ -1054,6 +875,71 @@ def _ordered_bucket_list(
         extra = [(k, v) for k, v in bucket_dict.items() if k not in order]
         return ordered + sorted(extra, key=lambda x: -float(x[1].get("net", 0) or 0))
     return sorted(bucket_dict.items(), key=lambda x: -float(x[1].get("net", 0) or 0))
+
+
+@app.get("/lab")
+def lab_view():
+    """Cinta de mercado + scores del alpha sombra (Postgres). Fail-open si Docker está down."""
+    from trading.infrastructure.persistence.lab_snapshot import fetch_lab_snapshot
+    from trading.infrastructure.persistence.ensemble_store import fetch_latest_ensemble
+
+    state = get_bot_state()
+    rotation_on = _rotation_active(state)
+    epoch = lab_epoch_start()
+    if rotation_on:
+        snap = {
+            "ok": True,
+            "error": "",
+            "pg": "",
+            "counts": {"ticks": 0, "bars": 0, "scores": 0},
+            "latest": [],
+            "history": [],
+            "ticks": [],
+            "bars": [],
+            "losers": {},
+            "partitions": [],
+        }
+        recent_pnl = {}
+    else:
+        snap = fetch_lab_snapshot(history_limit=60, since=epoch, symbols=_broker_symbols())
+        recent_pnl = _fetch_account_pnl_view(since=epoch)
+    ensemble_live = state.get("ensemble") or {}
+    ensemble_pg = fetch_latest_ensemble()
+    lab_vote_rows = _lab_vote_rows(ensemble_pg, ensemble_live)
+    try:
+        from trading.application.four_five_lab import four_five_rows
+
+        fires = four_five_rows(TRADES_LOG_PATH, limit=400, max_bytes=16 * 1024 * 1024)
+    except Exception:
+        fires = []
+    fires_sent = [r for r in fires if r.get("action") != "skip"][:30]
+    fires_skip_counts: dict[str, int] = {}
+    for r in fires:
+        if r.get("action") == "skip":
+            key = str(r.get("reason") or "skip")
+            fires_skip_counts[key] = fires_skip_counts.get(key, 0) + 1
+    return render_template(
+        "lab.html",
+        now=datetime.now(),
+        snap=snap,
+        recent_pnl=recent_pnl,
+        ensemble_live=ensemble_live,
+        ensemble_pg=ensemble_pg,
+        rotation_on=rotation_on,
+        lab_vote_rows=lab_vote_rows,
+        fires_n=len(fires),
+        fires_sent=fires_sent,
+        fires_skip_counts=sorted(fires_skip_counts.items(), key=lambda kv: -kv[1]),
+        kill_switch=state.get("kill_switch") or {},
+    )
+
+
+@app.get("/miner")
+def miner_view():
+    """Cierres manuales y el último resumen del minero. Fail-open si Postgres está down."""
+    from trading.infrastructure.persistence.miner_snapshot import fetch_miner_snapshot
+
+    return render_template("miner.html", now=datetime.now(), snap=fetch_miner_snapshot())
 
 
 @app.get("/journal")
@@ -1100,7 +986,11 @@ def journal_view():
     elif error is None:
         try:
             summary = analyze_trades.analyze_log(
-                str(TRADES_LOG_PATH), since=since_dt, until=until_dt, top_n=30
+                str(TRADES_LOG_PATH),
+                since=since_dt,
+                until=until_dt,
+                top_n=30,
+                symbols=_broker_symbols() or None,
             )
         except Exception as exc:
             error = f"Error procesando trades.log: {exc}"

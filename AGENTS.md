@@ -2,17 +2,27 @@
 
 This repository hosts a **trading bot** (under `trading/`) alongside the existing Gastos expense-tracker app. This file answers **what the project is**; role behavior is defined in `.cursor/rules/*.mdc`.
 
-## What the bot does
+**Live engine (since 2026-10-07):** daily **swing** Donchian 20/10 + SMA200 on the XBTFX **demo** (`swing_daily.py`, magic 260501). Runbook: [`trading/docs/SWING_ENGINE.md`](trading/docs/SWING_ENGINE.md). The rotation below is **stopped** (`kill_switch.halt` reason `rotacion_reemplazada_por_swing`) because it did not make money; it stays documented as history.
 
-Automated trading system that:
+**Former live engine:** crypto **rotation** on XBTFX **demo**, not the old H4/XAU loop. Full evidence, why we open/close, and the `trades.log` event catalog: [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md). Cursor also loads `.cursor/rules/rotation-engine.mdc` on every chat. **Update that markdown when the live rules change.**
 
-1. Ingests market data from configured exchanges
-2. Runs one or more strategies to generate signals
-3. Applies risk checks before any order is sent
-4. Executes orders in **paper** or **live** mode
-5. Logs all decisions for audit and post-trade analysis
+## What the rotation did (stopped 2026-10-07)
 
-The bot prioritizes **capital preservation** over raw backtest returns. No strategy ships without risk-quant validation.
+Automated **demo** trading that:
+
+1. Scans 79 XBTFX crypto CFDs on M1/M5/M15 (also pulls ~48h M15 and ~12d H4 for a Murphy swing snapshot on 4/5 fires). `climax_unbroken` (`would_veto`) skips with `murphy_climax`. IMX/VEC/TRX/ZRX/RSR/AXS 4/5 skip with `rank_tail`.
+2. Fires only on **4/5** independent modules, with HTF (M15 EMA50) veto, pullback, and RSI-in-range gates. The sent side is the consensus (no invert).
+3. Sizes so a **$0.50** stop is used when that distance is ≤ **5%** of price; otherwise ±5% with lot scaled to Kelly (capped at 0.50 USD)
+4. Skips if the bid/ask already covers that stop, or the spread hole is **> 10%** of the USD risk
+5. Caps **60 broker ENTRY_IN** per rolling hour and **one** position per symbol
+6. After **5 minutes**, close: `profit > 0.01` → `stale_take`, `profit < -0.0001` → `stale_loss`, band in between → `stale_time` (time-stop). Fill MTM 2026-10-03: +5m EV least-bad vs 15/30/60m on pre-invert fills.
+7. If the floating book (profit+swap+comm of magic 260414) is **≥ $0.50**, at least two tickets are open, and the youngest is **≥ 10 min** old, flatten **all** rotation positions (`rot_book_harvest`) so slots can re-enter on a fresh 4/5
+8. Blocks new entries while `kill_switch.halt` exists (or is unreadable); with `BOT_KILL_SWITCH_FLATTEN=1` (live since 2026-10-05; code default 0) a daily-loss hit flattens the rotation book once and persists the halt until a human clears it
+9. Logs every vote, skip, fill, reject, and close to `trades.log` (`why_open=consenso_4_5`, skips `veto_htf` / `sin_pullback` / `rsi_rango` / `murphy_climax` / `rank_tail` / spread) plus a `ROTATION_BOOK` snapshot every 60s (floating net of magic 260414) for later crypto ranking. 4/5 fires also carry `murphy` (M15/H4 swing tag, 38–50% retrace or retest vs climax; 1%/ATR penetration) and `alpha` (shadow score vs the consensus; telemetry only).
+
+The five modules (`trading/domain/ensemble.py`): **htf**, **momentum_short**, **intermarket**, **vol_bands**, **structure**. XBTFX volume does not vote. Runbook: [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md).
+
+Paper/demo only. Capital preservation over backtest cosmetics. Risk-quant owns size/stops; do not invent new numbers.
 
 ## Architecture overview
 
@@ -32,7 +42,7 @@ Infrastructure → Application → Domain
 | **Backtest** | `trading/backtest/` | Backtesting engine, walk-forward runners, cost models |
 | **Risk** | `trading/risk/` | Position sizing, stops, exposure limits, pre-trade checks |
 | **Execution** | `trading/execution/` | Order routing, fill handling, paper/live brokers |
-| **Docs** | `trading/docs/` | Requirements, acceptance criteria, runbooks |
+| **Docs** | `trading/docs/` | Live runbook [`ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md); requirements when added |
 
 ### Data flow (simplified)
 

@@ -1,0 +1,251 @@
+{
+  "design": "pre-registrado; holdout oculto salvo --reveal-holdout",
+  "source": "Binance spot 1m (USDT) + spread/swap XBTFX del terminal",
+  "stress": false,
+  "step_bars": 15,
+  "split_utc": "2026-02-01",
+  "symbols": 12,
+  "bootstrap": 2000,
+  "seed": 20261005,
+  "decision_rule": "train net>0 con p<0.01 por dia Y holdout confirma el signo",
+  "train": {
+    "1440": {
+      "range_utc": [
+        "2024-10-03",
+        "2026-09-29"
+      ],
+      "holdout_trades_reserved": 799,
+      "n": 1798,
+      "win_rate_pct": 46.3,
+      "profit_factor": 0.857,
+      "max_drawdown_usd": -31.45,
+      "exits": {
+        "sl": 479,
+        "time": 891,
+        "tp": 428
+      },
+      "mean_spread_usd": 0.0089,
+      "mean_swap_usd": -0.0028,
+      "net": {
+        "mean": -0.01438,
+        "ci95": [
+          -0.02726,
+          -0.00083
+        ],
+        "p_two_sided": 0.035,
+        "n_days": 474,
+        "n_trades": 1798
+      },
+      "gross": {
+        "mean": -0.00263,
+        "ci95": [
+          -0.01641,
+          0.01115
+        ],
+        "p_two_sided": 0.678,
+        "n_days": 474,
+        "n_trades": 1798
+      },
+      "net_no_swap": {
+        "mean": -0.01155,
+        "ci95": [
+          -0.02502,
+          0.00165
+        ],
+        "p_two_sided": 0.096,
+        "n_days": 474,
+        "n_trades": 1798
+      },
+      "mirror": {
+        "mean": -0.00848,
+        "ci95": [
+          -0.02167,
+          0.00602
+        ],
+        "p_two_sided": 0.236,
+        "n_days": 474,
+        "n_trades": 1798
+      }
+    },
+    "240": {
+      "range_utc": [
+        "2024-10-03",
+        "2026-09-29"
+      ],
+      "holdout_trades_reserved": 1261,
+      "n": 2863,
+      "win_rate_pct": 46.1,
+      "profit_factor": 0.89,
+      "max_drawdown_usd": -22.87,
+      "exits": {
+        "time": 2530,
+        "tp": 185,
+        "sl": 148
+      },
+      "mean_spread_usd": 0.0087,
+      "mean_swap_usd": -0.0004,
+      "net": {
+        "mean": -0.00554,
+        "ci95": [
+          -0.01287,
+          0.00188
+        ],
+        "p_two_sided": 0.14,
+        "n_days": 482,
+        "n_trades": 2863
+      },
+      "gross": {
+        "mean": 0.0035,
+        "ci95": [
+          -0.00389,
+          0.01099
+        ],
+        "p_two_sided": 0.335,
+        "n_days": 482,
+        "n_trades": 2863
+      },
+      "net_no_swap": {
+        "mean": -0.00518,
+        "ci95": [
+          -0.01233,
+          0.00202
+        ],
+        "p_two_sided": 0.176,
+        "n_days": 482,
+        "n_trades": 2863
+      },
+      "mirror": {
+        "mean": -0.01286,
+        "ci95": [
+          -0.02085,
+          -0.00568
+        ],
+        "p_two_sided": 0.0,
+        "n_days": 482,
+        "n_trades": 2863
+      }
+    }
+  },
+  "per_symbol": {
+    "ADAUSD!": {
+      "1440": {
+        "n": 295,
+        "train_net": 0.01645
+      },
+      "240": {
+        "n": 470,
+        "train_net": 0.01876
+      }
+    },
+    "ATMUSD!": {
+      "1440": {
+        "n": 119,
+        "train_net": -0.01968
+      },
+      "240": {
+        "n": 167,
+        "train_net": -0.03061
+      }
+    },
+    "AVAUSD!": {
+      "1440": {
+        "n": 78,
+        "train_net": 0.04095
+      },
+      "240": {
+        "n": 119,
+        "train_net": 0.02795
+      }
+    },
+    "BCHUSD!": {
+      "1440": {
+        "n": 214,
+        "train_net": -0.012
+      },
+      "240": {
+        "n": 301,
+        "train_net": -0.01235
+      }
+    },
+    "DOGUSD!": {
+      "1440": {
+        "n": 324,
+        "train_net": 0.01124
+      },
+      "240": {
+        "n": 541,
+        "train_net": -0.00741
+      }
+    },
+    "DOTUSD!": {
+      "1440": {
+        "n": 220,
+        "train_net": 0.0009
+      },
+      "240": {
+        "n": 339,
+        "train_net": -0.01516
+      }
+    },
+    "ETHUSD!": {
+      "1440": {
+        "n": 301,
+        "train_net": -0.10166
+      },
+      "240": {
+        "n": 482,
+        "train_net": -0.00776
+      }
+    },
+    "FILUSD!": {
+      "1440": {
+        "n": 35,
+        "train_net": -0.02624
+      },
+      "240": {
+        "n": 53,
+        "train_net": -0.045
+      }
+    },
+    "LNKUSD!": {
+      "1440": {
+        "n": 69,
+        "train_net": 0.29706
+      },
+      "240": {
+        "n": 119,
+        "train_net": 0.30178
+      }
+    },
+    "LTCUSD!": {
+      "1440": {
+        "n": 282,
+        "train_net": -0.00549
+      },
+      "240": {
+        "n": 447,
+        "train_net": -0.00269
+      }
+    },
+    "SOLUSD!": {
+      "1440": {
+        "n": 344,
+        "train_net": -0.00093
+      },
+      "240": {
+        "n": 577,
+        "train_net": -0.00098
+      }
+    },
+    "XRPUSD!": {
+      "1440": {
+        "n": 316,
+        "train_net": -0.02278
+      },
+      "240": {
+        "n": 509,
+        "train_net": -0.0039
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+---
+description: Rotación crypto APAGADA desde 2026-10-07; el motor vivo en la demo XBTFX es el swing diario (trading/docs/SWING_ENGINE.md). Leer ROTATION_ENGINE.md antes de tocar bot_mt5, ensemble o el dashboard.
+alwaysApply: true
+---
+
+# Rotación (APAGADA desde 2026-10-07)
+
+**Motor vivo en la demo: swing diario Donchian 20/10 + SMA200** (`swing_daily.py`, magic 260501, runbook `trading/docs/SWING_ENGINE.md`). La rotación (`bot_mt5.py`) está detenida con `kill_switch.halt` reason `rotacion_reemplazada_por_swing`; no reiniciarla ni borrar ese halt sin pedido del usuario. Lo de abajo describe la rotación tal como quedó.
+
+El bot **no** corre H4/M15 ni XAU. Detalle y catálogo de logs: **`trading/docs/ROTATION_ENGINE.md`**. Actualizá ese archivo cuando cambie el comportamiento.
+
+## Reglas actuales
+
+- Demo XBTFX only (`PAPER_DEMO_LIVE` + cuenta `trade_mode` demo). Nunca dinero real.
+- 79 CFD crypto (`!`). Magic 260414. Un slot por símbolo. 60 `DEAL_ENTRY_IN` / hora rodante.
+- 5 módulos M1/M5/M15; **4/5** dispara, sujeto a veto HTF (M15 EMA50), pullback M1 vs EMA9/20, y RSI solo en rango. El lado enviado es el consenso (sin invert; el fade del 2026-10-01 se revirtió el 2026-10-03). Kelly acotado a **0.50 USD** (solo achica). `m1_follow3` es interno de `momentum_short` (exactamente 3 M1 iguales → voto a la 4ª). Volumen XBTFX (`vote_m1_flow`) no entra al tally.
+- Fetch extra: M15 ~192 y H4 ~72 para snapshot Murphy en cada 4/5 (`murphy` en `ENSEMBLE_VOTE` / OPEN / CLOSE y `ensemble_votes.murphy`). **`would_veto` (climax_unbroken) ahora veta** el envío (`murphy_climax`). Tags `pullback_38_50` / `retest_broken` / `climax_unbroken`; penetración 1% o ATR, no 10% del precio.
+- Alpha sombra en cada 4/5 (`alpha` en el log, `would_avoid` telemetría). **No veta.** No es un sexto votante. Tick daemon + alpha engine, con rotación ON, puntúan las mismas 79 (cinta Redis/PG); tampoco mandan órdenes.
+- Ranking: universo sigue en 79; IMXUSD! y VECUSD! (WR stale < 10%, n≥20) y desde 2026-10-07 TRXUSD!, ZRXUSD!, RSRUSD! y AXSUSD! (cero ganadores netos 2026-09-30→10-06) se escanean y un 4/5 sale con `rank_tail`. No suma votantes ni cambia 60/h / Kelly.
+- SL/TP: **$0.50** si entra dentro del 5% del precio; si no, **±5%** y el lote escala. Repair no ensancha money-stop a 5%. CFD caro: stop se achica al money-stop en `volume_min`.
+- Gate spread: no abrir si el bid/ask cubre el stop o el agujero USD es **> 10%** del riesgo (`spread_cubre_stop` / `spread_caro`). No ensanchar SL a 1.2×spread. No usar el cap de 25 pts en crypto.
+- Tras **5 min**: take si `profit > 0.01`, loss si `profit < -0.0001`, banda del medio `stale_time` (`BOT_ROTATION_STALE_CLOSE_ALL=1`). Time-stop de scalp (MTM 2026-10-03).
+- Harvest del libro: ≥2 tickets, más joven ≥ 10 min, `floating_net` ≥ **0.50 USD** → cierra todas (`rot_book_harvest`). No es el stale por ticket.
+- Kill switch: `kill_switch.halt` presente (o ilegible) → `MANAGE_ONLY_KILL_SWITCH`, `open_trade` rechaza `kill_switch_halt`. `BOT_KILL_SWITCH_FLATTEN=1` live desde 2026-10-05 (default del código 0): con daily loss ≤ −25 cierra el libro una vez (`kill_switch`) y persiste el halt, que no se libera al cambiar el día. Clear solo humano: borrar el archivo o crear `kill_switch.clear`. Gemini/alpha nunca lo limpian.
+- Calibración/diario usan el **neto del bróker** (el log no ve SL/TP). Gemini semanal: tarea de Windows del domingo 23:30, una hipótesis en `trading/docs/proposals/`, nunca en el ciclo ni en `order_send`. Lee `trading/docs/ESTABLISHED_FACTS.md`: actualizalo cuando cambie una regla o se mida algo nuevo.
+- Logs JSON en `trades.log`: `ENSEMBLE_VOTE` (todos los símbolos, cada ciclo), `TRADE_OPEN` / `TRADE_CLOSE` con `why_open=consenso_4_5` / `why_closed` / `close_how` / `duration_seconds` / `net` / `spread_usd`, `murphy`, `alpha` (sombra), y `ROTATION_BOOK` cada 60s. Postgres guarda votos + SIGNAL/OPEN/CLOSE (fail-open).
+
+No restaurar H4/XAU/escalera con rotación ON. No commitear salvo que el usuario lo pida.

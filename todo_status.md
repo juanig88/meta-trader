@@ -1,5 +1,7 @@
 # MCP Configuration Task Progress
 
+Live trading in this repo is MT5 rotation (5 modules / 4/5), not MCP order routing. Snapshot: MCP `local-trading`. Runbook: `trading/docs/ROTATION_ENGINE.md`.
+
 ## Phase 1 — DETECT EXISTING MCPs
 - [x] Inspect repository for MCP configuration
 - [x] Check .cursor/mcp.json

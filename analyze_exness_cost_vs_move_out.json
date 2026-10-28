@@ -1,0 +1,414 @@
+{
+  "envia_ordenes": false,
+  "server": "Exness-MT5Trial11",
+  "trade_mode": 0,
+  "dias": 30,
+  "horas_ticks": 72,
+  "generado": "2026-10-27T18:23:54.736436+00:00",
+  "simbolos": {
+    "BTCUSD": {
+      "broker": "BTCUSDm",
+      "barras_m1": 43200,
+      "desde": "2026-09-14T15:21:00+00:00",
+      "hasta": "2026-10-27T18:22:00+00:00",
+      "precio": 80528.59,
+      "point": 0.01,
+      "contrato": 1.0,
+      "volume_min": 0.01,
+      "volume_step": 0.01,
+      "swap_mode": 1,
+      "swap_long": -1786.5,
+      "swap_short": 0.0,
+      "spread_actual_puntos": 640,
+      "spread_fijo": false,
+      "costo_pct_referencia": 0.007985047997617185,
+      "costo_usd_lote_min": 0.06430246563304352,
+      "spread_velas_pct": {
+        "mediana": 0.011817713192138356,
+        "p75": 0.012016313707984862,
+        "p90": 0.012911306285092914
+      },
+      "ticks": {
+        "n": 323248,
+        "desde": "2026-10-24T18:23:55+00:00",
+        "hasta": "2026-10-27T18:23:55+00:00",
+        "spread_pct_mediana": 0.007985047997617185,
+        "spread_pct_p75": 0.008015319278982868,
+        "spread_pct_p90": 0.008037462916062109,
+        "spread_pct_max": 0.00807701738968489,
+        "spread_usd_mediana": 6.399999999994179
+      },
+      "horizontes": {
+        "1m": {
+          "n": 43197,
+          "mov_abs_pct_mediana": 0.02106102823061784,
+          "mov_abs_pct_media": 0.03135199890379571,
+          "costo_sobre_mov": 0.3791385639001605,
+          "alcance_max_pct_mediana": 0.037044381086703826,
+          "frac_mov_mayor_2x_spread": 0.5889992360580596,
+          "frac_mov_mayor_3x_spread": 0.45473065259161516
+        },
+        "5m": {
+          "n": 43185,
+          "mov_abs_pct_mediana": 0.04672112945238727,
+          "mov_abs_pct_media": 0.06983584941597756,
+          "costo_sobre_mov": 0.1709087107098859,
+          "alcance_max_pct_mediana": 0.0877061467517537,
+          "frac_mov_mayor_2x_spread": 0.7902049322681487,
+          "frac_mov_mayor_3x_spread": 0.7022114160009263
+        },
+        "15m": {
+          "n": 43155,
+          "mov_abs_pct_mediana": 0.07887000199375827,
+          "mov_abs_pct_media": 0.11953190466237297,
+          "costo_sobre_mov": 0.10124315704022828,
+          "alcance_max_pct_mediana": 0.153738519796065,
+          "frac_mov_mayor_2x_spread": 0.8792723902212953,
+          "frac_mov_mayor_3x_spread": 0.8205769899200556
+        },
+        "60m": {
+          "n": 43020,
+          "mov_abs_pct_mediana": 0.16096625693550193,
+          "mov_abs_pct_media": 0.24103670685171733,
+          "costo_sobre_mov": 0.04960696825308387,
+          "alcance_max_pct_mediana": 0.3185794799482222,
+          "frac_mov_mayor_2x_spread": 0.943212459321246,
+          "frac_mov_mayor_3x_spread": 0.9145746164574616
+        },
+        "240m": {
+          "n": 42480,
+          "mov_abs_pct_mediana": 0.3387938102293375,
+          "mov_abs_pct_media": 0.49446234464532385,
+          "costo_sobre_mov": 0.02356904924624189,
+          "alcance_max_pct_mediana": 0.6828173588336761,
+          "frac_mov_mayor_2x_spread": 0.9691854990583804,
+          "frac_mov_mayor_3x_spread": 0.9547551789077213
+        }
+      },
+      "por_hora_servidor": {
+        "00": {
+          "spread_pct": 0.011821407612106012,
+          "mov5m_pct": 0.04409862492392724,
+          "costo_sobre_mov5m": 0.26806748810192255
+        },
+        "01": {
+          "spread_pct": 0.01182162981161898,
+          "mov5m_pct": 0.050890163166461555,
+          "costo_sobre_mov5m": 0.23229695241790577
+        },
+        "02": {
+          "spread_pct": 0.011816265810720254,
+          "mov5m_pct": 0.04676612382575884,
+          "costo_sobre_mov5m": 0.25266720532035714
+        },
+        "03": {
+          "spread_pct": 0.011834258669342247,
+          "mov5m_pct": 0.043467494749949154,
+          "costo_sobre_mov5m": 0.27225536547298
+        },
+        "04": {
+          "spread_pct": 0.011835193441775946,
+          "mov5m_pct": 0.041924340139981586,
+          "costo_sobre_mov5m": 0.28229886033409957
+        },
+        "05": {
+          "spread_pct": 0.011829092327724338,
+          "mov5m_pct": 0.04273637967233679,
+          "costo_sobre_mov5m": 0.27679210121257175
+        },
+        "06": {
+          "spread_pct": 0.011824042407362095,
+          "mov5m_pct": 0.041131703584440515,
+          "costo_sobre_mov5m": 0.2874678502700031
+        },
+        "07": {
+          "spread_pct": 0.011823753708372554,
+          "mov5m_pct": 0.045333356094190425,
+          "costo_sobre_mov5m": 0.26081796555732606
+        },
+        "08": {
+          "spread_pct": 0.011812041006553557,
+          "mov5m_pct": 0.048102303908259536,
+          "costo_sobre_mov5m": 0.2455608161530354
+        },
+        "09": {
+          "spread_pct": 0.011805988648367557,
+          "mov5m_pct": 0.04287432276188219,
+          "costo_sobre_mov5m": 0.2753626853521703
+        },
+        "10": {
+          "spread_pct": 0.011792571035600684,
+          "mov5m_pct": 0.04279660365358873,
+          "costo_sobre_mov5m": 0.2755492265473691
+        },
+        "11": {
+          "spread_pct": 0.011782269781224751,
+          "mov5m_pct": 0.0403136312435215,
+          "costo_sobre_mov5m": 0.2922651574116929
+        },
+        "12": {
+          "spread_pct": 0.011760723152833647,
+          "mov5m_pct": 0.04889393308629142,
+          "costo_sobre_mov5m": 0.2405354286405535
+        },
+        "13": {
+          "spread_pct": 0.011747750423281824,
+          "mov5m_pct": 0.0719548599694586,
+          "costo_sobre_mov5m": 0.16326555882768978
+        },
+        "14": {
+          "spread_pct": 0.011791069326201492,
+          "mov5m_pct": 0.08263383336349905,
+          "costo_sobre_mov5m": 0.1426905765624306
+        },
+        "15": {
+          "spread_pct": 0.011823003023851253,
+          "mov5m_pct": 0.06680289263329975,
+          "costo_sobre_mov5m": 0.17698339933797644
+        },
+        "16": {
+          "spread_pct": 0.011824268200489235,
+          "mov5m_pct": 0.05961834821988088,
+          "costo_sobre_mov5m": 0.1983327038327138
+        },
+        "17": {
+          "spread_pct": 0.011812564139599977,
+          "mov5m_pct": 0.05190172580472607,
+          "costo_sobre_mov5m": 0.22759482380303328
+        },
+        "18": {
+          "spread_pct": 0.011810537716066407,
+          "mov5m_pct": 0.0445044103087322,
+          "costo_sobre_mov5m": 0.265379040731814
+        },
+        "19": {
+          "spread_pct": 0.011821807301252363,
+          "mov5m_pct": 0.0426554220238462,
+          "costo_sobre_mov5m": 0.27714664960162555
+        },
+        "20": {
+          "spread_pct": 0.01183148207186105,
+          "mov5m_pct": 0.03797325939389751,
+          "costo_sobre_mov5m": 0.3115740460710209
+        },
+        "21": {
+          "spread_pct": 0.011836113853472933,
+          "mov5m_pct": 0.036576681855443605,
+          "costo_sobre_mov5m": 0.3235972552198963
+        },
+        "22": {
+          "spread_pct": 0.011835877101181913,
+          "mov5m_pct": 0.04072161090454829,
+          "costo_sobre_mov5m": 0.2906534598772451
+        },
+        "23": {
+          "spread_pct": 0.011838978760224321,
+          "mov5m_pct": 0.0389336054380629,
+          "costo_sobre_mov5m": 0.3040812333462985
+        }
+      }
+    },
+    "ETHUSD": {
+      "broker": "ETHUSDm",
+      "barras_m1": 43200,
+      "desde": "2026-09-14T13:51:00+00:00",
+      "hasta": "2026-10-27T18:22:00+00:00",
+      "precio": 2343.84,
+      "point": 0.01,
+      "contrato": 1.0,
+      "volume_min": 0.1,
+      "volume_step": 0.01,
+      "swap_mode": 1,
+      "swap_long": -52.6,
+      "swap_short": 0.0,
+      "spread_actual_puntos": 100,
+      "spread_fijo": false,
+      "costo_pct_referencia": 0.04306298392028181,
+      "costo_usd_lote_min": 0.10093274423171333,
+      "spread_velas_pct": {
+        "mediana": 0.037558967579099184,
+        "p75": 0.03989885639914756,
+        "p90": 0.040882907265301444
+      },
+      "ticks": {
+        "n": 164543,
+        "desde": "2026-10-24T18:23:58+00:00",
+        "hasta": "2026-10-27T18:23:56+00:00",
+        "spread_pct_mediana": 0.04306298392028181,
+        "spread_pct_p75": 0.043255962834476726,
+        "spread_pct_p90": 0.04337905485715277,
+        "spread_pct_max": 0.04366964784795975,
+        "spread_usd_mediana": 1.0
+      },
+      "horizontes": {
+        "1m": {
+          "n": 43118,
+          "mov_abs_pct_mediana": 0.028257240713247533,
+          "mov_abs_pct_media": 0.04199390683664254,
+          "costo_sobre_mov": 1.523962808587077,
+          "alcance_max_pct_mediana": 0.045398328042589586,
+          "frac_mov_mayor_2x_spread": 0.11872071988496684,
+          "frac_mov_mayor_3x_spread": 0.045711767707222045
+        },
+        "5m": {
+          "n": 42810,
+          "mov_abs_pct_mediana": 0.0633942789241837,
+          "mov_abs_pct_media": 0.09338455308581588,
+          "costo_sobre_mov": 0.679288173176998,
+          "alcance_max_pct_mediana": 0.11393522028472769,
+          "frac_mov_mayor_2x_spread": 0.3820135482363934,
+          "frac_mov_mayor_3x_spread": 0.23013314646110722
+        },
+        "15m": {
+          "n": 42146,
+          "mov_abs_pct_mediana": 0.10731529497810532,
+          "mov_abs_pct_media": 0.15925017380155296,
+          "costo_sobre_mov": 0.4012753627436574,
+          "alcance_max_pct_mediana": 0.20467394545337636,
+          "frac_mov_mayor_2x_spread": 0.5784178807004223,
+          "frac_mov_mayor_3x_spread": 0.43206947278508046
+        },
+        "60m": {
+          "n": 39837,
+          "mov_abs_pct_mediana": 0.21505772311318783,
+          "mov_abs_pct_media": 0.3215647731431903,
+          "costo_sobre_mov": 0.20023918832999626,
+          "alcance_max_pct_mediana": 0.4413095124265354,
+          "frac_mov_mayor_2x_spread": 0.7702387227953912,
+          "frac_mov_mayor_3x_spread": 0.667419735421844
+        },
+        "240m": {
+          "n": 34520,
+          "mov_abs_pct_mediana": 0.5273258406136683,
+          "mov_abs_pct_media": 0.7191877358657098,
+          "costo_sobre_mov": 0.0816629503120269,
+          "alcance_max_pct_mediana": 1.0183340962859722,
+          "frac_mov_mayor_2x_spread": 0.9050115874855157,
+          "frac_mov_mayor_3x_spread": 0.8603128621089223
+        }
+      },
+      "por_hora_servidor": {
+        "00": {
+          "spread_pct": 0.037390725604421075,
+          "mov5m_pct": 0.058752685900897994,
+          "costo_sobre_mov5m": 0.6364087876338193
+        },
+        "01": {
+          "spread_pct": 0.037450237996262466,
+          "mov5m_pct": 0.07062656221732411,
+          "costo_sobre_mov5m": 0.5302571273542214
+        },
+        "02": {
+          "spread_pct": 0.03766861413455189,
+          "mov5m_pct": 0.06431482373688291,
+          "costo_sobre_mov5m": 0.5856910109659509
+        },
+        "03": {
+          "spread_pct": 0.03765003539103327,
+          "mov5m_pct": 0.053810872193837955,
+          "costo_sobre_mov5m": 0.6996733904518404
+        },
+        "04": {
+          "spread_pct": 0.037632041425351204,
+          "mov5m_pct": 0.059703422837337206,
+          "costo_sobre_mov5m": 0.6303163141563963
+        },
+        "05": {
+          "spread_pct": 0.03766293941131388,
+          "mov5m_pct": 0.06413714785877822,
+          "costo_sobre_mov5m": 0.5872250430318923
+        },
+        "06": {
+          "spread_pct": 0.03763954862653287,
+          "mov5m_pct": 0.05657729150707613,
+          "costo_sobre_mov5m": 0.6652766087578668
+        },
+        "07": {
+          "spread_pct": 0.0377325751472546,
+          "mov5m_pct": 0.06082672204794637,
+          "costo_sobre_mov5m": 0.620328925788769
+        },
+        "08": {
+          "spread_pct": 0.03769090443094272,
+          "mov5m_pct": 0.06376030416636591,
+          "costo_sobre_mov5m": 0.5911343260314148
+        },
+        "09": {
+          "spread_pct": 0.037763066965246644,
+          "mov5m_pct": 0.05894872350622471,
+          "costo_sobre_mov5m": 0.6406087310993094
+        },
+        "10": {
+          "spread_pct": 0.037799894916292126,
+          "mov5m_pct": 0.057473288930209865,
+          "costo_sobre_mov5m": 0.6576950026679829
+        },
+        "11": {
+          "spread_pct": 0.03763558218482082,
+          "mov5m_pct": 0.0586096891460941,
+          "costo_sobre_mov5m": 0.6421392560367973
+        },
+        "12": {
+          "spread_pct": 0.03752232578384139,
+          "mov5m_pct": 0.06724007508474017,
+          "costo_sobre_mov5m": 0.558035155917857
+        },
+        "13": {
+          "spread_pct": 0.037457602679255866,
+          "mov5m_pct": 0.08843834821409269,
+          "costo_sobre_mov5m": 0.42354480195150207
+        },
+        "14": {
+          "spread_pct": 0.037578021366862946,
+          "mov5m_pct": 0.107969131702923,
+          "costo_sobre_mov5m": 0.3480441194086737
+        },
+        "15": {
+          "spread_pct": 0.0375789392817028,
+          "mov5m_pct": 0.08536848038754319,
+          "costo_sobre_mov5m": 0.4401968866156161
+        },
+        "16": {
+          "spread_pct": 0.03757244441716869,
+          "mov5m_pct": 0.08416190097757514,
+          "costo_sobre_mov5m": 0.4464305580167424
+        },
+        "17": {
+          "spread_pct": 0.037568139212496666,
+          "mov5m_pct": 0.07191259853409626,
+          "costo_sobre_mov5m": 0.5224138743183409
+        },
+        "18": {
+          "spread_pct": 0.03756757467494656,
+          "mov5m_pct": 0.06461477198875798,
+          "costo_sobre_mov5m": 0.5814084538050025
+        },
+        "19": {
+          "spread_pct": 0.03750016406334962,
+          "mov5m_pct": 0.05884049161035687,
+          "costo_sobre_mov5m": 0.6373190134385109
+        },
+        "20": {
+          "spread_pct": 0.03747213010323572,
+          "mov5m_pct": 0.05345260172358035,
+          "costo_sobre_mov5m": 0.7010347278700388
+        },
+        "21": {
+          "spread_pct": 0.037412128263740546,
+          "mov5m_pct": 0.049067529162122314,
+          "costo_sobre_mov5m": 0.7624620375753676
+        },
+        "22": {
+          "spread_pct": 0.03743005258922389,
+          "mov5m_pct": 0.05554023125611263,
+          "costo_sobre_mov5m": 0.6739268408268363
+        },
+        "23": {
+          "spread_pct": 0.037346598853577544,
+          "mov5m_pct": 0.04756374050601808,
+          "costo_sobre_mov5m": 0.7851905349801537
+        }
+      }
+    }
+  }
+}
