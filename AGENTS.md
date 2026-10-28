@@ -127,3 +127,12 @@ Secrets and exchange credentials live in `.env.local` (never committed). See `.e
 ## Related project
 
 The repo root also contains **Gastos App** (Next.js expense tracker). Trading bot work is isolated under `trading/` and does not share runtime with the web app unless explicitly integrated later.
+
+## Cursor Cloud specific instructions
+
+This checkout is a Python MetaTrader 5 bot (`bot_mt5.py`, `flask_dashboard.py`, `strategy_core.py`). There is no Next.js app and no `trading/` package here. `npm test` and `npm run lint` are not the project commands.
+
+- Dependencies live in `requirements.txt` (`Flask`, `python-dotenv`, `yfinance`, and Windows-only `MetaTrader5`). On Linux, install every requirement except `MetaTrader5`, plus `pytest`. The Cloud Agent install writes a fail-closed import stub so `import MetaTrader5` succeeds for unit tests. `initialize()` returns false. The stub cannot read a terminal or place orders.
+- Tests, from the repo root: `python3 -m pytest tests -q`. `python3 -m unittest discover -s tests -v` skips pytest-style modules that use `tmp_path` or `monkeypatch`. Use `python3 -m pytest` and `python3 -m pip`; `~/.local/bin` is not on the non-interactive PATH.
+- The dashboard listens on port 8000: `python3 -c "from flask_dashboard import app; app.run(host='0.0.0.0', port=8000, debug=False)"`. Open `http://127.0.0.1:8000`. `/positions` and **Ejecutar forward_metrics** need a Windows MT5 terminal. On Linux, forward metrics exits 2 when `MT5_LOGIN`, `MT5_PASSWORD`, and `MT5_SERVER` are unset, and positions reports that initialize failed. `/journal` reads `trades.log`, which the bot creates at runtime.
+- Do not request broker credentials for tests or the dashboard. Live trading stays on a Windows machine with MT5 open. See `.env.example`.
