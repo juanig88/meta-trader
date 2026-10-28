@@ -1,5 +1,5 @@
 """
-Multi-session coverage: BTC weekday windows, weekend block, XAU shared risk gates.
+Multi-session coverage: BTC weekday windows, weekend block.
 """
 
 from __future__ import annotations
@@ -8,7 +8,6 @@ import sys
 import unittest
 from datetime import datetime, time
 from pathlib import Path
-from unittest.mock import patch
 
 _ROOT = str(Path(__file__).resolve().parents[1])
 if _ROOT not in sys.path:
@@ -37,7 +36,6 @@ class TestBtcSessionAndWeekend(unittest.TestCase):
                     "cooldown_minutes": 45,
                 }
             },
-            xauusd_parallel_enabled=False,
         )
 
     def test_weekend_blocked_even_inside_clock_window(self) -> None:
@@ -63,69 +61,6 @@ class TestBtcSessionAndWeekend(unittest.TestCase):
         self.assertEqual(len(s), 3)
         self.assertEqual(s[0][0], time(6, 0))
         self.assertEqual(s[2][1], time(23, 0))
-
-
-class TestXauSharedRiskGates(unittest.TestCase):
-    def setUp(self) -> None:
-        self.cfg = Config(
-            xauusd_parallel_enabled=True,
-            xauusd_parallel_symbol="XAUUSD",
-            xauusd_parallel_start_hour=10,
-            xauusd_parallel_end_hour=14,
-            xauusd_parallel_max_positions=1,
-            daily_loss_limit=-5.0,
-            max_open_trades_total=4,
-            symbols=("BTCUSD",),
-            monthly_loss_limit_enabled=False,
-        )
-        self._inside = datetime(2026, 8, 7, 11, 0, 0)
-
-    def _run_cycle(self, *, skips: list[str]) -> None:
-        def fake_skip(symbol, reason, **kwargs):
-            skips.append(str(reason))
-
-        with patch.object(bot_mt5, "datetime") as mock_dt, patch.object(
-            bot_mt5, "_xauusd_log_skip", side_effect=fake_skip
-        ), patch.object(bot_mt5, "_xauusd_parallel_positions", return_value=[]):
-            mock_dt.now.return_value = self._inside
-            bot_mt5.run_xauusd_parallel_cycle(self.cfg)
-
-    def test_daily_loss_blocks_parallel_entries(self) -> None:
-        skips: list[str] = []
-        with patch.object(bot_mt5, "daily_loss_limit_reached", return_value=(True, -9.0)), patch.object(
-            bot_mt5, "monthly_loss_limit_reached", return_value=(False, {"enabled": False})
-        ), patch.object(bot_mt5, "_count_all_bot_open_positions", return_value=0):
-            self._run_cycle(skips=skips)
-        self.assertIn("daily_loss_limit", skips)
-
-    def test_max_opens_blocks_parallel_entries(self) -> None:
-        skips: list[str] = []
-        with patch.object(bot_mt5, "daily_loss_limit_reached", return_value=(False, 0.0)), patch.object(
-            bot_mt5, "monthly_loss_limit_reached", return_value=(False, {"enabled": False})
-        ), patch.object(bot_mt5, "_count_all_bot_open_positions", return_value=4):
-            self._run_cycle(skips=skips)
-        self.assertIn("max_open_trades_total", skips)
-
-
-    def test_weekend_blocks_parallel_entries_inside_clock_window(self) -> None:
-        cases = [
-            ("saturday", datetime(2026, 8, 8, 11, 0, 0)),
-            ("sunday", datetime(2026, 8, 9, 11, 0, 0)),
-        ]
-        for name, when in cases:
-            with self.subTest(name=name):
-                self.assertIn(when.weekday(), (5, 6))
-                skips: list[str] = []
-
-                def fake_skip(symbol, reason, **kwargs):
-                    skips.append(str(reason))
-
-                with patch.object(bot_mt5, "datetime") as mock_dt, patch.object(
-                    bot_mt5, "_xauusd_log_skip", side_effect=fake_skip
-                ), patch.object(bot_mt5, "_xauusd_parallel_positions", return_value=[]):
-                    mock_dt.now.return_value = when
-                    bot_mt5.run_xauusd_parallel_cycle(self.cfg)
-                self.assertEqual(skips, ["weekend_block"])
 
 
 if __name__ == "__main__":

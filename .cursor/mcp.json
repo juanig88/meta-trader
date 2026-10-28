@@ -7,6 +7,30 @@
     "context7": {
       "command": "context7-mcp",
       "args": []
+    },
+    "ccxt": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "${workspaceFolder}/trading/infrastructure/mcp/run_ccxt_mcp.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONPATH": "${workspaceFolder}",
+        "LOCAL_MCP_ROOT": "${workspaceFolder}"
+      }
+    },
+    "local-trading": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "${workspaceFolder}/trading/infrastructure/mcp/server.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONPATH": "${workspaceFolder}",
+        "LOCAL_MCP_ROOT": "${workspaceFolder}"
+      }
     }
   }
 }

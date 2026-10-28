@@ -45,3 +45,5 @@ You define **what** the bot should do and **how we know it works** — in busine
 ```
 
 Store requirements under `trading/docs/requirements/` or `docs/trading/`.
+
+Live product (since 2026-10-07): daily Donchian 20/10 + SMA200 swing, long only, 79 XBTFX crypto CFDs, 0.5% risk / 10 positions, −35% DD halt, demo only. Runbook: `trading/docs/SWING_ENGINE.md`. The crypto rotation (`trading/docs/ROTATION_ENGINE.md`) is stopped; do not write stories that restore H4/XAU or restart rotation without the user asking.

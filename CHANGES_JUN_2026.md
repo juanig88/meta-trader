@@ -1,5 +1,7 @@
 # Cambios estrategia bot — Junio 2026 (experimento R:R + Chandelier)
 
+> Histórico. El live actual (desde 2026-10-07) es el swing diario Donchian 20/10 + SMA200: `trading/docs/SWING_ENGINE.md`. La rotación crypto quedó apagada (`trading/docs/ROTATION_ENGINE.md`).
+
 **Diagnóstico previo:** 94 trades reales en mayo (12-may → 1-jun) dieron:
 - Win rate 51% (bueno), pero **profit factor 0.25** (desastroso)
 - Avg win **$0.17** vs avg loss **-$0.71** → R:R **1:4 en contra**

@@ -1,0 +1,23 @@
+{
+  "skipped": "",
+  "path": "trading\\docs\\proposals\\2026-10-19.md",
+  "latency_ms": 14781,
+  "usage": {
+    "promptTokenCount": 8513,
+    "candidatesTokenCount": 2088,
+    "totalTokenCount": 11491,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 8513
+      }
+    ],
+    "thoughtsTokenCount": 890,
+    "serviceTier": "standard"
+  },
+  "finish": "STOP",
+  "missing_headings": [],
+  "facts_outdated": true,
+  "day": "2026-10-19",
+  "model": "gemini-2.5-flash"
+}

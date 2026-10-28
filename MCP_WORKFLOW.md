@@ -6,6 +6,8 @@ This document outlines the standard workflows for using Model Context Protocol (
 
 MCP workflows provide standardized procedures for leveraging external tools, data sources, and services through the Model Context Protocol. These workflows ensure consistency, security, and efficiency across all AI agents in the system.
 
+Live MT5 orders in this repo go through `swing_daily.py` (daily Donchian swing, demo XBTFX, since 2026-10-07), not through MCP write tools. The rotation (`bot_mt5.py`) is stopped. `local-trading` is snapshot-only. See `trading/docs/SWING_ENGINE.md`.
+
 ## Core Workflow Principles
 
 ### 1. Discovery First

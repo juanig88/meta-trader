@@ -1,0 +1,84 @@
+{
+  "day": "2026-10-27",
+  "sources": [
+    "trades.log"
+  ],
+  "pnl_source": "log",
+  "n_signals": 0,
+  "n_opens": 0,
+  "rejects": {},
+  "closes": {
+    "n": 0,
+    "pnl": 0,
+    "wins": 0,
+    "losses": 0,
+    "flat": 0,
+    "win_rate": null,
+    "profit_factor": null,
+    "largest_loss": null,
+    "largest_win": null,
+    "mean_net": null
+  },
+  "log_closes": {
+    "n": 0,
+    "pnl": 0,
+    "wins": 0,
+    "losses": 0,
+    "flat": 0,
+    "win_rate": null,
+    "profit_factor": null,
+    "largest_loss": null,
+    "largest_win": null,
+    "mean_net": null
+  },
+  "log_vs_broker": null,
+  "kill_switch": {},
+  "calibration": {
+    "scope": "sent_consensus",
+    "n_matched": 3152,
+    "questions": {
+      "alpha_would_avoid_predicts_loss": {
+        "n": 1355,
+        "brier": 0.436162,
+        "brier_skill": -1.4024,
+        "sufficient": true,
+        "gate_discussable": false
+      },
+      "murphy_would_veto_predicts_loss": {
+        "n": 1355,
+        "brier": 0.672325,
+        "brier_skill": -2.7032,
+        "sufficient": true,
+        "gate_discussable": false
+      },
+      "consensus_share_predicts_win": {
+        "n": 1355,
+        "brier": 0.532221,
+        "brier_skill": -2.3081,
+        "sufficient": true,
+        "gate_discussable": null
+      }
+    }
+  },
+  "gemini_latency_ms": null,
+  "gemini_cost": null,
+  "live_gate": false,
+  "swing": {
+    "ran": false,
+    "stale_only": false,
+    "swing_day": null,
+    "entries": 0,
+    "exits": 0,
+    "opened": 0,
+    "closed": 0,
+    "open_fails": 0,
+    "close_fails": 0,
+    "equity": null,
+    "block_reason": "",
+    "gate_reason": "",
+    "stale": 0,
+    "universe": null,
+    "skips": {}
+  },
+  "rotation_halt": "rotacion_reemplazada_por_swing"
+}

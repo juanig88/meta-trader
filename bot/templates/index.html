@@ -10,26 +10,26 @@
   <body>
     {% set running = state.get("running", false) %}
     {% set mode = state.get("mode", "n/a") %}
-    {% set pnl = state.get("pnl_today", 0.0) %}
+    {% set pnl_bot = state.get("pnl_today", 0.0) %}
+    {% set today = today_pnl or {} %}
+    {% if today.get("ok") %}
+      {% set pnl = today.get("account_net", 0.0) %}
+      {% set open_n = (today.get("floating") or [])|length %}
+      {% set realized_today = today.get("realized_net", 0.0) %}
+    {% else %}
+      {% set pnl = pnl_bot %}
+      {% set open_n = state.get("open_positions_total", "n/a") %}
+      {% set realized_today = pnl_bot %}
+    {% endif %}
+    {% set daily_limit = state.get("daily_loss_limit") %}
+    {% if today.get("ok") and daily_limit is not none %}
+      {% set limit_hit = realized_today <= daily_limit %}
+    {% else %}
+      {% set limit_hit = state.get("daily_loss_limit_reached", "n/a") %}
+    {% endif %}
     {% set stale = health.get("heartbeat_stale", false) %}
     {% set pid_alive = health.get("pid_alive") %}
     {% set show_stale = stale or (running and (pid_alive is sameas false)) %}
-
-    {% if forward_ok %}
-    <div class="card" style="border-color:#166534;background:#0f1f14;">
-      <strong class="good">forward_metrics</strong> terminó bien. Se actualizó <span class="mono">forward_results.jsonl</span>.
-    </div>
-    {% endif %}
-    {% if forward_err %}
-    <div class="card warn">
-      <strong>forward_metrics</strong> no pudo completarse.
-      {% if forward_err == "missing_script" %}Falta <span class="mono">forward_metrics.py</span>.{% endif %}
-      {% if forward_err == "timeout" %}Timeout (120s). ¿MT5 colgado o sin red?{% endif %}
-      {% if forward_err == "os" %}No se pudo lanzar el subproceso.{% endif %}
-      {% if forward_err == "nonzero" %}Código de salida {{ forward_rc if forward_rc is not none else "?" }}. Revisá la consola donde corre Flask (stderr logueado).{% endif %}
-      Si el bot está usando Python+MT5 a la vez, probá ejecutar <span class="mono">py .\forward_metrics.py</span> en otra ventana cuando el bot esté parado.
-    </div>
-    {% endif %}
 
     {% if telegram_test == "ok" %}
     <div class="card" style="border-color:#166534;background:#0f1f14;">
@@ -53,27 +53,224 @@
     </div>
     {% endif %}
 
+    {% set ens = state.get("ensemble") or {} %}
+    {% set rotation_on = state.get("rotation_enabled") or ens %}
+    {% set hour = hourly_opens or {} %}
+    {% set rot = rotation_stats or {} %}
+
     <div class="card header">
       <div>
-        <h1>MT5 Bot Dashboard</h1>
-        <div class="muted">Última actualización: {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto refresh 5s)</div>
-        <div class="muted" style="margin-top:6px;">
-          <a href="/positions">Posiciones abiertas</a>
+        <h1>{% if rotation_on %}Rotación · 79 crypto{% else %}MT5 Bot Dashboard{% endif %}</h1>
+        <div class="muted">
+          {% if rotation_on %}
+            5 módulos · 4/5 + veto M15 · SL/TP $0.50 o ±5% · tope $0.50 · gate spread ≤ {{ "%.0f"|format((state.get("rotation_max_spread_usd_frac") or 0.10) * 100) }}% del riesgo · {{ hour.get("n", ens.get("opens_this_hour", "—")) }} / {{ hour.get("cap", ens.get("hour_cap", 60)) }} aperturas en 60 min
+          {% else %}
+            {{ now.strftime("%Y-%m-%d %H:%M:%S") if now else "" }}
+          {% endif %}
+        </div>
+        <div style="margin-top:8px;">
+          <a href="/lab">Lab / votos</a>
+          &nbsp;|&nbsp;
+          <a href="/positions">Posiciones</a>
           &nbsp;|&nbsp;
           <a href="/journal">Journal</a>
+          {% if not rotation_on %}
           &nbsp;|&nbsp;
-          <a href="/reports">Reportes JSONL →</a>
-          &nbsp;|&nbsp;
-          <a href="/backtests">Backtests</a>
-          &nbsp;|&nbsp;
-          <a href="/scans">Scans</a>
-          &nbsp;|&nbsp;
-          <a href="/portfolio">Portfolio</a>
-          &nbsp;|&nbsp;
-          <a href="/forward">Forward</a>
+          <a href="/miner">Minero</a>
+          {% endif %}
         </div>
       </div>
       <div class="pill">{{ mode }}</div>
+    </div>
+
+    {% if not rotation_on %}
+    {% set miner = miner or {} %}
+    <div class="card">
+      <h2>Minero manual</h2>
+      {% if not miner.get("ok") %}
+      <div class="muted">{{ miner.get("error") or "Sin Postgres." }} <a href="/miner">Abrir</a></div>
+      {% else %}
+      <div class="kv">
+        <div class="muted">Cierres / ganadores</div>
+        <div class="mono">{{ miner.n_trades }} / {{ miner.n_winners }} · {{ miner.win_rate }}</div>
+        <div class="muted">Último resumen</div>
+        <div class="mono">
+          {% if miner.report %}{{ miner.report.trigger }} · {{ miner.report.ts }}{% else %}todavía no{% endif %}
+        </div>
+      </div>
+      <div class="muted" style="margin-top:8px;"><a href="/miner">Ver cierres y contraste con alpha →</a></div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% set exec_mode = ens.get("execution_mode") or ("SIM" if ens.get("dry_run") else "BLOCKED") %}
+    <div class="card">
+      <h2>Cuota 60 minutos</h2>
+      <p class="muted" style="margin-top:0;">
+        Aperturas <strong>reales del bróker</strong> (DEAL de entrada) en la hora rodante.
+        El tope es {{ hour.get("cap", 60) }}/hora; si llegamos, el bot no manda más hasta que salga una de la ventana.
+        Magic {{ (hour.get("magics") or [260414])|join(", ") }}.
+        {% if hour.get("window_from") %}
+          Ventana {{ hour.window_from[11:19] }}–{{ hour.window_to[11:19] }}.
+        {% endif %}
+      </p>
+      {% if not hour.get("ok") %}
+      <div class="warn" style="margin:8px 0;padding:8px 10px;border:1px solid #7f1d1d;border-radius:8px;">
+        No pude leer deals del bróker. {{ hour.get("error") or "¿MT5 abierto?" }}
+        Mientras tanto, el contador en memoria del bot (se pierde al reiniciar):
+        <span class="mono">{{ ens.get("opens_this_hour", "—") }} / {{ ens.get("hour_cap", 60) }}</span>
+      </div>
+      {% else %}
+      <div class="kv">
+        <div class="muted">Aperturas últimos 60 min</div>
+        <div class="mono" style="font-size:28px;line-height:1.2;">
+          <span class="{{ 'bad' if hour.get('at_cap') else 'good' }}">{{ hour.get("n", 0) }}</span>
+          <span class="muted" style="font-size:16px;"> / {{ hour.get("cap", 60) }}</span>
+        </div>
+        <div class="muted">Restantes</div>
+        <div class="mono">{{ hour.get("remaining", 0) }}{% if hour.get("at_cap") %} · <span class="bad">tope alcanzado, no abre más hasta que gire la ventana</span>{% endif %}</div>
+        <div class="muted">Posiciones abiertas ahora</div>
+        <div class="mono">{{ rot.get("n_open", state.get("open_positions_managed", open_n)) }} · <a href="/positions">ver tickets</a></div>
+      </div>
+      {% if hour.get("rows") %}
+      <table style="margin-top:12px;">
+        <thead>
+          <tr>
+            <th>Hora</th>
+            <th>Símbolo</th>
+            <th>Lado</th>
+            <th>Lote</th>
+            <th>Deal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in hour.rows[:60] %}
+          <tr>
+            <td class="mono muted">{{ (row.time[11:19] if row.time else "—") }}</td>
+            <td class="mono">{{ row.symbol }}</td>
+            <td>{% if row.side == "BUY" %}<span class="good">BUY</span>{% else %}<span class="bad">{{ row.side }}</span>{% endif %}</td>
+            <td class="mono">{{ row.volume }}</td>
+            <td class="mono muted">{{ row.ticket }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted" style="margin-top:10px;">En esta hora el bróker no tiene DEAL de apertura con el magic del bot ({{ hour.get("n", 0) }} / {{ hour.get("cap", 60) }}).</p>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Consenso (5 módulos · 4/5)</h2>
+      <p class="muted" style="margin-top:0;">
+        Motor de rotación multi-crypto.
+        {% if exec_mode == "DEMO_XBTFX" %}
+          <span class="good">DEMO XBTFX · órdenes reales en la cuenta demo</span>
+        {% elif exec_mode == "SIM" %}
+          <span class="good">SIM · señales sí, órdenes no</span>
+        {% else %}
+          <span class="bad">BLOQUEADO · {{ ens.get("execution_reason") or "sin envío" }}</span>
+        {% endif %}
+        · cuota bróker {{ hour.get("n", ens.get("opens_this_hour", "—")) }} / {{ hour.get("cap", ens.get("hour_cap", 60)) }} · ciclo {{ ens.get("ts") or "—" }}
+        · <a href="/lab">detalle de votos en Lab</a>
+      </p>
+      <p class="muted" style="margin-top:6px;">
+        El rojo al abrir es el spread (comprás ask, MT5 marca bid), no un voto invertido.
+        No abrimos si el spread cubre el stop o se come más del
+        {{ "%.0f"|format((state.get("rotation_max_spread_usd_frac") or 0.10) * 100) }}% del riesgo USD.
+        {% set skips = ens.get("skip_counts") or {} %}
+        Este ciclo: spread_caro {{ skips.get("spread_caro", 0) }} · spread_cubre_stop {{ skips.get("spread_cubre_stop", 0) }}
+        · veto_htf {{ skips.get("veto_htf", 0) }} · sin_pullback {{ skips.get("sin_pullback", 0) }} · rsi_rango {{ skips.get("rsi_rango", 0) }} · murphy_climax {{ skips.get("murphy_climax", 0) }} · rank_tail {{ skips.get("rank_tail", 0) }}.
+      </p>
+      {% if not ens %}
+      <div class="muted">Todavía no hay ciclo. El bot escribe esto en bot_state.json al votar.</div>
+      {% else %}
+      <div class="kv">
+        <div class="muted">PnL rotación (hoy)</div>
+        <div class="mono {{ 'good' if (rot.get('account_net') or 0) >= 0 else 'bad' }}">
+          {{ "%.2f"|format(rot.get("account_net") or 0) }}
+          <span class="muted">(real {{ "%.2f"|format(rot.get("realized_net") or 0) }} · float {{ "%.2f"|format(rot.get("floating_net") or 0) }})</span>
+        </div>
+        <div class="muted">Winrate consenso</div>
+        <div class="mono">
+          {% if rot.get("winrate") is not none %}{{ "%.0f"|format((rot.get("winrate") or 0) * 100) }}%{% else %}—{% endif %}
+          · {{ rot.get("n_wins", 0) }}W / {{ rot.get("n_losses", 0) }}L
+          · {{ rot.get("n_open", 0) }} abiertas
+        </div>
+        <div class="muted">Escaneados (este ciclo)</div>
+        <div class="mono">{{ ens.get("scanned", 0) }} / {{ (ens.get("symbols") or [])|length or ens.get("scanned", 0) }}</div>
+        <div class="muted">Señales BUY / SELL (este ciclo, no acumulado)</div>
+        <div class="mono"><span class="good">{{ ens.get("buy_consensus", 0) }}</span> / <span class="bad">{{ ens.get("sell_consensus", 0) }}</span></div>
+        <div class="muted">Sin mayoría</div><div class="mono">{{ ens.get("no_majority", 0) }}</div>
+        <div class="muted">Disparos / a 1 voto</div>
+        <div class="mono">{{ ens.get("fired_count", 0) }} / {{ ens.get("near_miss_count", 0) }}</div>
+      </div>
+      {% set val = ens.get("validation") or {} %}
+      {% if val.get("reason") or val.get("engine_a") or val.get("allow_live") is not none %}
+      <p class="muted" style="margin-top:8px;">
+        Validación dual (PG):
+        {% if val.get("allow_live") %}<span class="good">PASS</span>{% else %}<span class="bad">FAIL {{ val.get("reason") or "" }}</span>{% endif %}
+        · A touch n={{ (val.get("engine_a") or {}).get("n_decided", "—") }} wr={{ (val.get("engine_a") or {}).get("winrate", "—") }}
+        · B OOS n={{ (val.get("engine_b") or {}).get("n_decided", "—") }} wr={{ (val.get("engine_b") or {}).get("winrate", "—") }}
+      </p>
+      {% endif %}
+      {% set short_rows = (ens.get("fired") or []) + (ens.get("near_miss") or []) + (ens.get("module_skips") or []) %}
+      {% if short_rows %}
+      <table style="margin-top:12px;">
+        <thead>
+          <tr>
+            <th>Símbolo</th>
+            <th>Señal</th>
+            <th>Votos</th>
+            <th>Ejecución</th>
+            <th>Riesgo</th>
+            <th>Skip</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in short_rows[:16] %}
+            {% set c = row.get("consensus") or {} %}
+            {% set sz = row.get("size") or {} %}
+            <tr>
+              <td class="mono">{{ row.get("symbol") }}</td>
+              <td>
+                {% if c.get("direction") == "BUY" %}<span class="good">BUY</span>
+                {% elif c.get("direction") == "SELL" %}<span class="bad">SELL</span>
+                {% else %}<span class="muted">NONE</span>{% endif %}
+              </td>
+              <td class="mono">{{ c.get("buy", 0) }}/5 BUY · {{ c.get("sell", 0) }}/5 SELL</td>
+              <td class="mono">
+                {% if row.get("action") == "LIVE" %}ORDEN DEMO
+                {% elif row.get("action") == "DRY_RUN" %}SEÑAL
+                {% else %}{{ row.get("action") }}{% endif %}
+              </td>
+              <td class="mono">{% if sz.get("risk_usd") %}{{ "%.2f"|format(sz.risk_usd) }}{% else %}—{% endif %}</td>
+              <td class="mono" style="font-size:12px;">{{ row.get("skip_reason") or "—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% set scan_rows = ens.get("symbols") or [] %}
+      {% if scan_rows %}
+      <h3 style="margin-top:16px;font-size:14px;">Universo escaneado ({{ scan_rows|length }})</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+        {% for row in scan_rows %}
+          {% set c = row.get("consensus") or {} %}
+          {% set dir = c.get("direction") or row.get("direction") or "NONE" %}
+          <span class="mono" style="font-size:11px;padding:2px 6px;border:1px solid #1f2a44;border-radius:4px;"
+                title="{{ c.get('buy', 0) }}/5 BUY · {{ c.get('sell', 0) }}/5 SELL · {{ row.get('action') }} {{ row.get('skip_reason') or '' }}">
+            {{ row.get("symbol") }}
+            {% if dir == "BUY" %}<span class="good">B{{ c.get("buy", 0) }}</span>
+            {% elif dir == "SELL" %}<span class="bad">S{{ c.get("sell", 0) }}</span>
+            {% else %}<span class="muted">·</span>{% endif %}
+            {% if row.get("action") == "LIVE" %}✓{% elif row.get("action") == "DRY_RUN" %}○{% endif %}
+          </span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endif %}
     </div>
 
     <div class="grid">
@@ -84,17 +281,37 @@
           <div class="{{ 'good' if running else 'bad' }}">{{ running }}</div>
 
           <div class="muted">PnL hoy</div>
-          <div class="{{ 'good' if pnl >= 0 else 'bad' }}">{{ pnl }}</div>
+          <div class="{{ 'good' if (rot.get('account_net') if rotation_on else pnl) >= 0 else 'bad' }}">
+            {% if rotation_on %}
+              {{ "%.2f"|format(rot.get("account_net") or 0) }}
+            {% elif today.get("ok") %}{{ "%.2f"|format(pnl) }}{% else %}{{ pnl }}{% endif %}
+          </div>
+          {% if rotation_on %}
+          <div class="muted">Realizado / flotante</div>
+          <div class="mono">{{ "%.2f"|format(rot.get("realized_net") or 0) }} / {{ "%.2f"|format(rot.get("floating_net") or 0) }}</div>
+          <div class="muted">Cierres rotación</div>
+          <div>{{ rot.get("n_closed", 0) }} · {{ rot.get("n_wins", 0) }} gan. · {{ rot.get("n_losses", 0) }} perd.</div>
+          {% elif today.get("ok") %}
+          <div class="muted">Realizado / flotante</div>
+          <div class="mono">{{ "%.2f"|format(today.realized_net) }} / {{ "%.2f"|format(today.floating_net) }}</div>
+          <div class="muted">Cierres hoy</div>
+          <div>{{ today.n_wins }} gan. · {{ today.n_losses }} perd.</div>
+          {% endif %}
 
           <div class="muted">Open positions</div>
-          <div>{{ state.get("open_positions_total", "n/a") }}</div>
+          <div>{% if rotation_on %}{{ rot.get("n_open", open_n) }}{% else %}{{ open_n }}{% endif %}</div>
 
           <div class="muted">Daily loss limit</div>
-          <div>{{ state.get("daily_loss_limit", "n/a") }}</div>
+          <div>{{ daily_limit if daily_limit is not none else "n/a" }}</div>
 
           <div class="muted">Limit reached</div>
-          <div>{{ state.get("daily_loss_limit_reached", "n/a") }}</div>
+          <div>{{ limit_hit }}</div>
+          {% if not rotation_on and today.get("ok") %}
+          <div class="muted">Kill switch (bot)</div>
+          <div class="mono muted">{{ pnl_bot }} — el proceso todavía no recarga el historial con hora del servidor</div>
+          {% endif %}
 
+          {% if not rotation_on %}
           {% set mll = state.get("monthly_loss_limit") or {} %}
           {% if mll.get("enabled") %}
           <div class="muted">6% Rule (mensual)</div>
@@ -114,6 +331,7 @@
           <div class="{{ 'bad' if state.get('monthly_loss_limit_reached') else 'good' }}">
             {{ "SI — bloqueando nuevas entradas" if state.get("monthly_loss_limit_reached") else "no" }}
           </div>
+          {% endif %}
           {% endif %}
 
           <div class="muted">Bot heartbeat (JSON)</div>
@@ -137,11 +355,129 @@
         </div>
       </div>
 
+      {% set day = day_pnl or {} %}
+      {% if rotation_on %}
+      <div class="card">
+        <h2>Cierres rotación ({{ today.window_label or "desde arranque" }})</h2>
+        <p class="muted" style="margin-top:0;">
+          Todos los DEAL de cierre del universo crypto: bot, SL/TP y cierres a mano. No es el historial H4/XAU desde el 24/09.
+        </p>
+        <div class="kv">
+          <div class="muted">Neto</div>
+          <div class="{{ 'good' if (rot.get('account_net') or 0) >= 0 else 'bad' }}">{{ "%.2f"|format(rot.get("account_net") or 0) }}</div>
+          <div class="muted">Realizado / flotante</div>
+          <div class="mono">{{ "%.2f"|format(rot.get("realized_net") or 0) }} / {{ "%.2f"|format(rot.get("floating_net") or 0) }}</div>
+          <div class="muted">Cierres</div>
+          <div>{{ rot.get("n_closed", 0) }} · {{ rot.get("n_wins", 0) }} gan. · {{ rot.get("n_losses", 0) }} perd. · {{ rot.get("n_open", 0) }} abiertas</div>
+        </div>
+        {% set rot_closed = rotation_closed or [] %}
+        {% if rot_closed %}
+        <table style="margin-top:12px;">
+          <thead>
+            <tr>
+              <th>Hora</th>
+              <th>Símbolo</th>
+              <th>Lado</th>
+              <th>Net</th>
+              <th>Origen</th>
+              <th>Cómo</th>
+              <th>Comentario</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rot_closed %}
+            <tr>
+              <td class="mono muted">{{ row.time[11:19] if row.time else "—" }}</td>
+              <td class="mono">{{ row.symbol }}</td>
+              <td>{{ row.side }}</td>
+              <td class="mono {{ 'good' if row.net >= 0 else 'bad' }}">{{ "%.4f"|format(row.net) }}</td>
+              <td class="muted">{{ row.origin }}</td>
+              <td class="muted">{{ row.how or "—" }}</td>
+              <td class="muted">{{ row.comment }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="muted" style="margin-top:10px;">Todavía no hay DEAL de cierre crypto desde el arranque de rotación.</p>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="card">
+        <h2>Cuenta desde {{ day.window_label or "momento cero" }}</h2>
+        {% if not day.get("ok") %}
+        <div class="muted">No pude leer el historial del bróker. {{ day.get("error") or "¿MT5 abierto?" }}</div>
+        {% else %}
+        <div class="kv">
+          <div class="muted">Neto cuenta</div>
+          <div class="{{ 'good' if day.account_net >= 0 else 'bad' }}">{{ "%.2f"|format(day.account_net) }}</div>
+          <div class="muted">Realizado</div>
+          <div class="{{ 'good' if day.realized_net >= 0 else 'bad' }}">{{ "%.2f"|format(day.realized_net) }}</div>
+          <div class="muted">Flotante</div>
+          <div class="{{ 'good' if day.floating_net >= 0 else 'bad' }}">{{ "%.2f"|format(day.floating_net) }}</div>
+          <div class="muted">Bot / manual</div>
+          <div class="mono">{{ "%.2f"|format(day.bot_realized_net) }} / {{ "%.2f"|format(day.manual_realized_net) }}</div>
+          <div class="muted">Cierres</div>
+          <div>{{ day.n_wins }} gan. · {{ day.n_losses }} perd.</div>
+        </div>
+        {% if day.by_symbol %}
+        <table style="margin-top:12px;">
+          <thead>
+            <tr><th>Símbolo</th><th>Gan.</th><th>Perd.</th><th>Net</th></tr>
+          </thead>
+          <tbody>
+            {% for row in day.by_symbol %}
+            <tr>
+              <td class="mono">{{ row.symbol }}</td>
+              <td>{{ row.n_wins }}</td>
+              <td>{{ row.n_losses }}</td>
+              <td class="mono {{ 'good' if row.net >= 0 else 'bad' }}">{{ "%.2f"|format(row.net) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+        <p class="muted" style="margin:10px 0 0;font-size:12px;">
+          Misma ventana que /lab (desde el 24/09). A la izquierda, PnL hoy es live MT5 (realizado + flotante).
+        </p>
+        {% if day.closed %}
+        <table style="margin-top:12px;">
+          <thead>
+            <tr>
+              <th>Hora</th>
+              <th>Símbolo</th>
+              <th>Lado</th>
+              <th>Origen</th>
+              <th>Net</th>
+              <th>Comentario</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in day.closed %}
+            <tr>
+              <td class="mono muted">{{ row.time[11:19] if row.time else "—" }}</td>
+              <td class="mono">{{ row.symbol }}</td>
+              <td>{{ row.side }}</td>
+              <td class="muted">{{ row.origin }}</td>
+              <td class="mono {{ 'good' if row.net >= 0 else 'bad' }}">{{ "%.2f"|format(row.net) }}</td>
+              <td class="muted">{{ row.comment }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="muted" style="margin-top:10px;">Hoy todavía no hay DEAL de cierre en el bróker.</div>
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if not rotation_on %}
       {% set pv = parallel_view or {} %}
       {% set tracks = pv.get('tracks') or [] %}
       {% if tracks %}
       <div class="card" style="grid-column: 1 / -1;">
-        <h2>Parallel tracks (XAU + FX + BTC)</h2>
+        <h2>Parallel tracks (FX + BTC)</h2>
         <p class="muted" style="margin-top:0;">
           {% set meta = pv.get('meta') or {} %}
           Fuente: {% if meta.get('from_bot_state') %}<span class="good">bot_state.eval_tracks</span>{% else %}<span class="bad">.env fallback</span> (reiniciá el bot){% endif %}
@@ -201,7 +537,7 @@
         </table>
         {% set recent = pv.get('recent_events') or [] %}
         {% if recent %}
-        <p class="muted" style="margin:14px 0 6px;">Últimos eventos EVAL / XAU parallel (trades.log)</p>
+        <p class="muted" style="margin:14px 0 6px;">Últimos eventos EVAL (trades.log)</p>
         <table>
           <thead>
             <tr>
@@ -234,136 +570,6 @@
       </div>
       {% endif %}
 
-      {% if xauusd_state.get('enabled') %}
-      <div class="card">
-        <h2>XAUUSD parallel (breakout M15)</h2>
-        {% set pos = xauusd_state.get('position') or {} %}
-        {% set session = xauusd_state.get('session') or {} %}
-        {% set last_sig = xauusd_state.get('last_signal') or {} %}
-        {% set last_skip = xauusd_state.get('last_skip') or {} %}
-        {% set skip_reasons = xauusd_state.get('skip_reasons') or {} %}
-        <div class="kv">
-          <div class="muted">Símbolo</div><div>{{ xauusd_state.get('symbol', 'XAUUSD') }}</div>
-          <div class="muted">Posición</div>
-          <div style="color:{% if (pos.get('count') or 0) > 0 %}#f59e0b{% else %}#94a3b8{% endif %}">
-            {% if (pos.get('count') or 0) > 0 %}
-              {{ pos.get('side') }} · ticket {{ pos.get('ticket') }} · float
-              <span class="{{ 'good' if (pos.get('float_pnl') or 0) >= 0 else 'bad' }}">${{ "%.2f"|format(pos.get('float_pnl') or 0) }}</span>
-            {% else %}
-              flat (0 / {{ xauusd_state.get('max_positions', 1) }})
-            {% endif %}
-          </div>
-          <div class="muted">Salidas</div>
-          <div style="color:#16a34a">
-            {% if (xauusd_state.get('sl_mode') or 'atr') == 'atr' %}
-              ATR×{{ xauusd_state.get('sl_atr_mult', 1.5) }} / RR {{ xauusd_state.get('tp_rr', 2.0) }}
-              <span class="muted">(money fallback ${{ xauusd_state.get('tp_money', 2) }}/${{ xauusd_state.get('sl_money', 2) }})</span>
-            {% else %}
-              Target/Stop ${{ xauusd_state.get('tp_money', 0.50) }} / ${{ xauusd_state.get('sl_money', 0.50) }}
-            {% endif %}
-          </div>
-          <div class="muted">ADX min / H1 filter</div>
-          <div class="mono">≥{{ xauusd_state.get('adx_min', 25) }} · H1={{ 'sí' if xauusd_state.get('h1_filter', true) else 'no' }} · H4={{ 'sí' if xauusd_state.get('h4_filter', true) else 'no' }}</div>
-          <div class="muted">Estado Horario</div>
-          {% set win_label = xauusd_state.get('window_label') or xauusd_state.get('sessions') or ((xauusd_state.get('start_hour', 10)|string) + '-' + (xauusd_state.get('end_hour', 14)|string) + 'hs') %}
-          {% if xauusd_state.get('in_window') is sameas true %}
-            <div style="color:#16a34a">Activo · {{ win_label }}</div>
-          {% elif xauusd_state.get('in_window') is sameas false %}
-            <div style="color:#dc2626">Fuera de horario · {{ win_label }}</div>
-          {% else %}
-            <div class="muted">{{ win_label }}</div>
-          {% endif %}
-          <div class="muted">Cooldownoldown</div>
-          <div class="mono">
-            {% set cd = xauusd_state.get('cooldown_remaining_sec', 0) %}
-            {% if cd and cd > 0 %}
-              {{ "%.0f"|format(cd) }}s restantes / {{ xauusd_state.get('cooldown_seconds', 300) }}s
-            {% else %}
-              listo ({{ xauusd_state.get('cooldown_seconds', 300) }}s entre entradas)
-            {% endif %}
-          </div>
-          <div class="muted">Última señal</div>
-          <div class="mono">
-            {% if last_sig %}
-              {{ last_sig.get('decision') }} · ADX {{ last_sig.get('adx') }} · {{ last_sig.get('ts', '—') }}
-            {% else %}—{% endif %}
-          </div>
-          <div class="muted">Último skip</div>
-          <div class="mono">
-            {% if last_skip %}
-              {{ last_skip.get('reason') }} · {{ last_skip.get('ts', '—') }}
-            {% else %}—{% endif %}
-          </div>
-        </div>
-        {% set hourly = xauusd_state.get('hourly') or {} %}
-        {% set win = hourly.get('window') or {} %}
-        {% set totals = win if win.get('opens') is not none else (hourly.get('totals') or session) %}
-        <p class="muted" style="margin:12px 0 6px;">
-          Sesión proceso ({{ hourly.get('date', '—') }}) · ventana {{ win.get('label') or win_label }}
-          · 1 trade / vela M15={{ 'sí' if xauusd_state.get('one_trade_per_bar') else 'no' }}
-        </p>
-        <div class="kv" style="margin-bottom:8px;">
-          <div class="muted">Opens / Closes / Skips</div>
-          <div class="mono">{{ totals.get('opens', 0) }} / {{ totals.get('closes', 0) }} / {{ totals.get('skips', 0) }}</div>
-          <div class="muted">Señales (entradas intentadas)</div>
-          <div class="mono">{{ totals.get('signals', 0) }}</div>
-          <div class="muted">PnL cerrado (sesión)</div>
-          <div class="mono {{ 'good' if (totals.get('pnl') or 0) >= 0 else 'bad' }}">
-            ${{ "%.2f"|format(totals.get('pnl') or 0) }}
-          </div>
-          <div class="muted">Spread medio (opens)</div>
-          <div class="mono">
-            {% if totals.get('spread_avg') is not none %}{{ totals.get('spread_avg') }} pts{% else %}—{% endif %}
-          </div>
-          {% if (session.get('open_close_gap') or 0) > 2 %}
-          <div class="muted">Nota</div>
-          <div class="bad">Gap opens−closes={{ session.get('open_close_gap') }} (cierres broker aún sincronizando / reiniciar bot)</div>
-          {% endif %}
-        </div>
-        {% if skip_reasons %}
-        <p class="muted" style="margin:8px 0 4px;">Skips por motivo (conteo crudo)</p>
-        <div class="mono" style="font-size:12px;margin-bottom:8px;">
-          {% for reason, cnt in skip_reasons.items()|sort %}
-            {{ reason }}={{ cnt }}{% if not loop.last %} · {% endif %}
-          {% endfor %}
-        </div>
-        {% endif %}
-        {% set rows = hourly.get('by_hour') or [] %}
-        {% if rows %}
-        <table>
-          <thead>
-            <tr>
-              <th>Hora</th>
-              <th>Open</th>
-              <th>Close</th>
-              <th>Skip</th>
-              <th>PnL</th>
-              <th>Spread</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in rows %}
-              <tr{% if r.get('in_window') %} style="background:rgba(22,163,74,0.08)"{% endif %}>
-                <td class="mono">{{ r.get('label', r.get('hour')) }}</td>
-                <td class="mono">{{ r.get('opens', 0) }}</td>
-                <td class="mono">{{ r.get('closes', 0) }}</td>
-                <td class="mono">{{ r.get('skips', 0) }}</td>
-                <td class="mono {{ 'good' if (r.get('pnl') or 0) >= 0 else 'bad' }}">
-                  ${{ "%.2f"|format(r.get('pnl') or 0) }}
-                </td>
-                <td class="mono">
-                  {% if r.get('spread_avg') is not none %}{{ r.get('spread_avg') }}{% else %}—{% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        {% else %}
-        <p class="muted" style="margin:0;">Sin actividad aún en esta sesión del bot.</p>
-        {% endif %}
-      </div>
-      {% endif %}
-
       <div class="card">
         <h2>Last trade time</h2>
         <table>
@@ -375,11 +581,10 @@
           </thead>
           <tbody>
             {% set last_trade_time = state.get("last_trade_time", {}) %}
-            {% set xau_sym = (xauusd_state or {}).get('symbol') if xauusd_state is defined else None %}
             {% if last_trade_symbols %}
               {% for sym in last_trade_symbols %}
                 <tr>
-                  <td class="mono">{{ sym }}{% if xau_sym and sym == xau_sym %} <span class="muted">(scalper)</span>{% endif %}</td>
+                  <td class="mono">{{ sym }}</td>
                   <td class="mono">{{ last_trade_time.get(sym, "—") }}</td>
                 </tr>
               {% endfor %}
@@ -392,166 +597,10 @@
         </table>
       </div>
 
-      <div class="card">
-        <h2>Régimen de mercado</h2>
-        <p class="muted" style="margin-top:0;">
-          Lectura pasiva (no hay push): se actualiza cuando el bot escribe <span class="mono">bot_state.json</span>.
-          <strong>Telegram</strong> sí avisa cuando el <em>régimen</em> cambia de categoría; acá ves el régimen actual y el merge sugerido.
-        </p>
-        {% set regimes = state.get("market_regimes") or {} %}
-        <table>
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Régimen</th>
-              <th>ADX M15</th>
-              <th>ADX H4</th>
-              <th>Actualizado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% if regimes %}
-              {% for sym in regimes.keys()|sort %}
-                {% set r = regimes[sym] %}
-                  <tr>
-                    <td class="mono">{{ sym }}</td>
-                    <td>{{ r.get("regime", "—") }}</td>
-                    <td class="mono">{{ r.get("adx_m15", "—") }}</td>
-                    <td class="mono">{{ r.get("adx_h4", "—") }}</td>
-                    <td class="mono">{{ r.get("updated_at") or "—" }}</td>
-                  </tr>
-              {% endfor %}
-            {% else %}
-              <tr>
-                <td colspan="5" class="muted">
-                  Todavía no hay datos (bot recién iniciado o <span class="mono">BOT_MARKET_REGIME_ENABLED=0</span>).
-                </td>
-              </tr>
-            {% endif %}
-          </tbody>
-        </table>
-        {% if regimes %}
-          <div style="margin-top:14px;">
-            <h3 style="margin-bottom:8px;font-size:1rem;">Régimen = telemetría (no muta el bot)</h3>
-            <p class="muted" style="margin-top:0;font-size:13px;">
-              La detección de tendencia/lateral es solo contexto para Telegram y este panel.
-              Los filtros siguen en <span class="mono">BOT_SYMBOL_CONFIG</span> (.env); no se actualizan en caliente
-              (<span class="mono">BOT_MARKET_REGIME_AUTO_APPLY=0</span> por defecto).
-              El JSON de abajo es <strong>referencia opcional</strong> si algún día querés tunear a mano con calma — no es una orden de merge.
-            </p>
-            {% for sym in regimes.keys()|sort %}
-              {% set r = regimes[sym] %}
-              {% if r.get("suggested_config_patch_json") %}
-                <details style="margin-top:10px;border:1px solid #334155;border-radius:8px;padding:8px 12px;background:#0b1220;">
-                  <summary class="mono">{{ sym }} — {{ r.get("regime", "—") }}</summary>
-                  {% if r.get("hint_es") %}
-                    <p class="muted" style="margin:8px 0 6px;font-size:13px;line-height:1.4;">{{ r.get("hint_es") }}</p>
-                  {% endif %}
-                  <div class="muted" style="font-size:12px;margin-bottom:4px;">Referencia opcional (no auto-aplicada):</div>
-                  <pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:12px;color:#e5e7eb;">{{ r.get("suggested_config_patch_json") }}</pre>
-                </details>
-              {% endif %}
-            {% endfor %}
-          </div>
-        {% endif %}
-      </div>
-    </div>
-
-    {% if regime_export_text %}
-    <div class="card">
-      <h2>Exportar régimen para pegar en el chat</h2>
-      <p class="muted" style="margin-top:0;">
-        Etiqueta de régimen por símbolo + JSON de <strong>referencia</strong> (telemetría; no se aplica solo).
-        También:
-        <a href="{{ url_for('export_market_regime') }}" target="_blank" rel="noopener noreferrer"><span class="mono">/export/market-regime</span></a>.
-      </p>
-      <textarea
-        id="regime-export-box"
-        readonly
-        rows="18"
-        style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px;padding:10px;border-radius:8px;border:1px solid #334155;background:#0b1220;color:#e5e7eb;resize:vertical;"
-      >{{ regime_export_text }}</textarea>
-      <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
-        <button
-          type="button"
-          id="regime-export-copy"
-          style="padding:6px 12px;border-radius:8px;border:1px solid #334155;background:#1e3a5f;color:#e5e7eb;cursor:pointer;"
-        >
-          Copiar al portapapeles
-        </button>
-        <span class="muted" id="regime-export-copy-msg" style="font-size:13px;display:none;"></span>
-      </div>
-      <script>
-        (function () {
-          var btn = document.getElementById("regime-export-copy");
-          var box = document.getElementById("regime-export-box");
-          var msg = document.getElementById("regime-export-copy-msg");
-          if (!btn || !box) return;
-          btn.addEventListener("click", async function () {
-            try {
-              await navigator.clipboard.writeText(box.value);
-              if (msg) {
-                msg.style.display = "inline";
-                msg.textContent = "Listo — pegalo en Cursor / Telegram / archivo.";
-                setTimeout(function () {
-                  msg.style.display = "none";
-                  msg.textContent = "";
-                }, 4000);
-              }
-              btn.textContent = "Copiado ✓";
-              setTimeout(function () {
-                btn.textContent = "Copiar al portapapeles";
-              }, 2500);
-            } catch (e) {
-              box.focus();
-              box.select();
-              try {
-                document.execCommand("copy");
-              } catch (ignored) {}
-            }
-          });
-        })();
-      </script>
-    </div>
-    {% endif %}
-
-    <div class="card">
-      <h2>Forward (último snapshot)</h2>
-      {% if forward_latest %}
-        <div class="muted" style="margin-bottom:10px;">
-          Fuente: última entrada de <span class="mono">forward_results.jsonl</span> ·
-          <a href="/forward">tabla completa →</a>
-        </div>
-        <div class="kv">
-          <div class="muted">ts</div>
-          <div class="mono">{{ forward_latest.get("ts", "—") }}</div>
-          <div class="muted">Ventana (días)</div>
-          <div class="mono">{{ forward_latest.get("days", "—") }} · {{ forward_latest.get("window_start", "") }} → {{ forward_latest.get("window_end", "") }}</div>
-          <div class="muted">Símbolos / magic</div>
-          <div class="mono">{{ (forward_latest.get("symbols") or [])|join(",") }} · magic={{ forward_latest.get("magic", "—") }}</div>
-          <div class="muted">Deals / outs</div>
-          <div class="mono">{{ forward_latest.get("deals_matched", "—") }} / {{ forward_latest.get("deals_out_matched", "—") }}</div>
-          <div class="muted">Outs/día · PnL · WR outs</div>
-          <div class="mono">
-            {{ forward_latest.get("outs_per_day", "—") }} ·
-            <span class="{{ 'good' if (forward_latest.get('pnl_total') or 0) >= 0 else 'bad' }}">{{ forward_latest.get("pnl_total", "—") }}</span> ·
-            {{ forward_latest.get("winrate_out_deals", "—") }}
-          </div>
-          <div class="muted">Baseline BT trades/día</div>
-          <div class="mono">{{ forward_latest.get("trades_per_day_backtest", "—") }}</div>
-          <div class="muted">Opens con spread (log)</div>
-          <div class="mono">{{ forward_latest.get("opens_log", "—") }}</div>
-        </div>
-      {% else %}
-        <p class="muted">Todavía no hay filas en <span class="mono">forward_results.jsonl</span>. Podés generar una corrida abajo o con <span class="mono">py .\forward_metrics.py</span>.</p>
       {% endif %}
-      <form method="post" action="{{ url_for('forward_run') }}" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
-        <label class="muted">Ventana (días) <input type="number" name="days" value="14" min="1" max="366" style="width:4.5rem;padding:4px 6px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e5e7eb;" /></label>
-        <button type="submit" style="padding:6px 12px;border-radius:8px;border:1px solid #334155;background:#1e3a5f;color:#e5e7eb;cursor:pointer;">Ejecutar forward_metrics</button>
-        <span class="muted" style="font-size:12px;">Requiere MT5 y <span class="mono">.env</span>. Puede interferir si el bot ya usa MT5 desde Python.</span>
-      </form>
     </div>
 
+    {% if not rotation_on %}
     <div class="card">
       <h2>Telegram (prueba)</h2>
       <p class="muted" style="margin-top:0;">
@@ -568,6 +617,7 @@
         <button type="submit" style="padding:6px 12px;border-radius:8px;border:1px solid #334155;background:#1e3a5f;color:#e5e7eb;cursor:pointer;">Enviar mensaje de prueba</button>
       </form>
     </div>
+    {% endif %}
 
     <div class="card">
       <h2>Archivos</h2>

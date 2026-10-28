@@ -6,6 +6,8 @@ This document outlines the architectural design of the Model Context Protocol (M
 
 The MCP architecture follows a hub-and-spoke model where the AI agent (Cline) acts as the central hub that connects to various specialized MCP servers (spokes), each providing domain-specific capabilities. This design allows for modular extension, clear separation of concerns, and secure access to external resources.
 
+Production trading here is the **daily swing engine** on MT5 demo (`swing_daily.py`, Donchian 20/10 + SMA200, since 2026-10-07; the rotation `bot_mt5.py` is stopped). Vibe-Trading and QuantConnect are research / dual-backtest — not the XBTFX `order_send` path.
+
 ## Core Components
 
 ### 1. MCP Host (Cline)
@@ -41,6 +43,8 @@ This document outlines the architectural design of the Model Context Protocol (M
 ## Overview
 
 The MCP architecture follows a hub-and-spoke model where the AI agent (Cline) acts as the central hub that connects to various specialized MCP servers (spokes), each providing domain-specific capabilities. This design allows for modular extension, clear separation of concerns, and secure access to external resources.
+
+Production trading here is the **daily swing engine** on MT5 demo (`swing_daily.py`, Donchian 20/10 + SMA200, since 2026-10-07; the rotation `bot_mt5.py` is stopped). Vibe-Trading and QuantConnect are research / dual-backtest — not the XBTFX `order_send` path.
 
 ## Core Components
 

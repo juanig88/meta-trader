@@ -12,6 +12,7 @@
       <div>
         <h1>Posiciones abiertas</h1>
         <div class="muted">Snapshot en vivo desde MetaTrader5 · {{ now.strftime("%Y-%m-%d %H:%M:%S") }} (auto refresh 10s)</div>
+        <div class="muted" style="margin-top:4px;">Spread $ es el agujero bid/ask de ahora sobre el lote (no el PnL). Un flotante rojo chico suele ser eso, no un voto al revés.</div>
         <div class="muted" style="margin-top:6px;">
           <a href="/">← Dashboard</a>
           {% if symbols_filter %}
@@ -152,6 +153,8 @@
             <th>SL</th>
             <th>TP</th>
             <th>Swap</th>
+            <th>Spread pts</th>
+            <th>Spread $</th>
             <th>PnL</th>
             <th>Magic</th>
             <th>Gestión</th>
@@ -171,6 +174,8 @@
             <td class="mono">{% if p.sl %}{{ fmt|format(p.sl) }}{% else %}—{% endif %}</td>
             <td class="mono">{% if p.tp %}{{ fmt|format(p.tp) }}{% else %}—{% endif %}</td>
             <td class="mono">{{ "%.2f"|format(p.swap) }}</td>
+            <td class="mono">{% if p.spread_pts is not none %}{{ "%.1f"|format(p.spread_pts) }}{% else %}—{% endif %}</td>
+            <td class="mono">{% if p.spread_usd is not none %}{{ "%.3f"|format(p.spread_usd) }}{% else %}—{% endif %}</td>
             <td class="mono {{ 'good' if p.profit >= 0 else 'bad' }}">{{ "%.2f"|format(p.profit) }}</td>
             <td class="mono">{{ p.magic }}</td>
             <td>
@@ -185,7 +190,7 @@
         </tbody>
         <tfoot>
           <tr>
-            <td colspan="9" style="text-align:right;" class="muted">Total flotante (PnL + swap):</td>
+            <td colspan="11" style="text-align:right;" class="muted">Total flotante (PnL + swap):</td>
             <td class="mono {{ 'good' if total_profit >= 0 else 'bad' }}">{{ "%.2f"|format(total_profit) }}</td>
             <td colspan="2"></td>
           </tr>

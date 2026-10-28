@@ -1,0 +1,279 @@
+{
+  "symbol": "BTCUSD!",
+  "source": "yf",
+  "m1_bars": 41721,
+  "calendar_days": 29.0,
+  "spread_pts_by_utc_hour_xbtfx": {
+    "0": 85995.0,
+    "1": 85937.5,
+    "2": 85996.0,
+    "3": 85977.0,
+    "4": 86002.0,
+    "5": 86013.0,
+    "6": 86488.0,
+    "7": 86998.0,
+    "8": 87230.0,
+    "9": 86442.0,
+    "10": 86888.5,
+    "11": 86806.0,
+    "12": 86932.0,
+    "13": 86749.5,
+    "14": 86582.0,
+    "15": 86459.0,
+    "16": 86334.5,
+    "17": 86343.0,
+    "18": 86145.0,
+    "19": 85951.5,
+    "20": 86021.5,
+    "21": 85871.0,
+    "22": 85944.5,
+    "23": 85942.0
+  },
+  "fires_4_5": 7359,
+  "fire_outcome": {
+    "sin_pullback": 5723,
+    "veto_htf": 1266,
+    "dispara": 212,
+    "murphy_climax": 158
+  },
+  "gate_pass_with_raised_risk": 212,
+  "risk_usd_median": 9.03,
+  "stop_pct_median": 1.105,
+  "by_hold_minutes": {
+    "5": {
+      "net": {
+        "n": 179,
+        "win_rate_pct": 15.1,
+        "total_usd": -142.51,
+        "mean_usd": -0.7961,
+        "median_usd": -0.8663,
+        "profit_factor": 0.143,
+        "sharpe_per_trade": -0.7177,
+        "t_stat": -9.6,
+        "max_drawdown_usd": -142.51,
+        "exits": {
+          "time": 179
+        }
+      },
+      "gross_before_spread": {
+        "n": 179,
+        "win_rate_pct": 49.2,
+        "total_usd": 11.97,
+        "mean_usd": 0.0669,
+        "median_usd": -0.0067,
+        "profit_factor": 1.208,
+        "sharpe_per_trade": 0.0603,
+        "t_stat": 0.81,
+        "max_drawdown_usd": -13.92,
+        "exits": {
+          "time": 179
+        }
+      },
+      "mirror_side_net": {
+        "n": 179,
+        "win_rate_pct": 14.0,
+        "total_usd": -166.44,
+        "mean_usd": -0.9298,
+        "median_usd": -0.8528,
+        "profit_factor": 0.063,
+        "sharpe_per_trade": -0.838,
+        "t_stat": -11.21,
+        "max_drawdown_usd": -166.75,
+        "exits": {
+          "time": 179
+        }
+      },
+      "first_half_net": {
+        "n": 89,
+        "win_rate_pct": 16.9,
+        "total_usd": -60.8,
+        "mean_usd": -0.6832,
+        "median_usd": -0.801,
+        "profit_factor": 0.171,
+        "sharpe_per_trade": -0.6408,
+        "t_stat": -6.05,
+        "max_drawdown_usd": -60.81,
+        "exits": {
+          "time": 89
+        }
+      },
+      "second_half_net": {
+        "n": 90,
+        "win_rate_pct": 13.3,
+        "total_usd": -81.7,
+        "mean_usd": -0.9078,
+        "median_usd": -0.9097,
+        "profit_factor": 0.121,
+        "sharpe_per_trade": -0.7967,
+        "t_stat": -7.56,
+        "max_drawdown_usd": -81.7,
+        "exits": {
+          "time": 90
+        }
+      },
+      "mean_spread_usd": 0.863,
+      "mean_r_multiple": -0.0879
+    },
+    "15": {
+      "net": {
+        "n": 163,
+        "win_rate_pct": 23.3,
+        "total_usd": -133.24,
+        "mean_usd": -0.8175,
+        "median_usd": -0.9279,
+        "profit_factor": 0.276,
+        "sharpe_per_trade": -0.4617,
+        "t_stat": -5.89,
+        "max_drawdown_usd": -133.24,
+        "exits": {
+          "time": 162,
+          "tp": 1
+        }
+      },
+      "gross_before_spread": {
+        "n": 163,
+        "win_rate_pct": 45.4,
+        "total_usd": 7.44,
+        "mean_usd": 0.0456,
+        "median_usd": -0.0684,
+        "profit_factor": 1.083,
+        "sharpe_per_trade": 0.0258,
+        "t_stat": 0.33,
+        "max_drawdown_usd": -14.89,
+        "exits": {
+          "time": 162,
+          "tp": 1
+        }
+      },
+      "mirror_side_net": {
+        "n": 163,
+        "win_rate_pct": 21.5,
+        "total_usd": -146.37,
+        "mean_usd": -0.898,
+        "median_usd": -0.7911,
+        "profit_factor": 0.215,
+        "sharpe_per_trade": -0.5233,
+        "t_stat": -6.68,
+        "max_drawdown_usd": -150.42,
+        "exits": {
+          "time": 162,
+          "tp": 1
+        }
+      },
+      "first_half_net": {
+        "n": 81,
+        "win_rate_pct": 23.5,
+        "total_usd": -60.58,
+        "mean_usd": -0.748,
+        "median_usd": -0.9179,
+        "profit_factor": 0.301,
+        "sharpe_per_trade": -0.4233,
+        "t_stat": -3.81,
+        "max_drawdown_usd": -61.03,
+        "exits": {
+          "time": 80,
+          "tp": 1
+        }
+      },
+      "second_half_net": {
+        "n": 82,
+        "win_rate_pct": 23.2,
+        "total_usd": -72.66,
+        "mean_usd": -0.8861,
+        "median_usd": -0.9445,
+        "profit_factor": 0.253,
+        "sharpe_per_trade": -0.5001,
+        "t_stat": -4.53,
+        "max_drawdown_usd": -72.66,
+        "exits": {
+          "time": 82
+        }
+      },
+      "mean_spread_usd": 0.863,
+      "mean_r_multiple": -0.0903
+    },
+    "60": {
+      "net": {
+        "n": 123,
+        "win_rate_pct": 32.5,
+        "total_usd": -121.03,
+        "mean_usd": -0.984,
+        "median_usd": -1.0588,
+        "profit_factor": 0.463,
+        "sharpe_per_trade": -0.288,
+        "t_stat": -3.19,
+        "max_drawdown_usd": -121.03,
+        "exits": {
+          "time": 116,
+          "tp": 3,
+          "sl": 4
+        }
+      },
+      "gross_before_spread": {
+        "n": 123,
+        "win_rate_pct": 44.7,
+        "total_usd": -14.87,
+        "mean_usd": -0.1209,
+        "median_usd": -0.1988,
+        "profit_factor": 0.906,
+        "sharpe_per_trade": -0.0354,
+        "t_stat": -0.39,
+        "max_drawdown_usd": -37.7,
+        "exits": {
+          "time": 116,
+          "tp": 3,
+          "sl": 4
+        }
+      },
+      "mirror_side_net": {
+        "n": 123,
+        "win_rate_pct": 37.4,
+        "total_usd": -90.06,
+        "mean_usd": -0.7322,
+        "median_usd": -0.6606,
+        "profit_factor": 0.548,
+        "sharpe_per_trade": -0.2151,
+        "t_stat": -2.39,
+        "max_drawdown_usd": -105.46,
+        "exits": {
+          "time": 116,
+          "tp": 3,
+          "sl": 4
+        }
+      },
+      "first_half_net": {
+        "n": 61,
+        "win_rate_pct": 34.4,
+        "total_usd": -44.84,
+        "mean_usd": -0.7351,
+        "median_usd": -0.9966,
+        "profit_factor": 0.571,
+        "sharpe_per_trade": -0.2046,
+        "t_stat": -1.6,
+        "max_drawdown_usd": -45.34,
+        "exits": {
+          "time": 56,
+          "tp": 3,
+          "sl": 2
+        }
+      },
+      "second_half_net": {
+        "n": 62,
+        "win_rate_pct": 30.6,
+        "total_usd": -76.19,
+        "mean_usd": -1.2289,
+        "median_usd": -1.1695,
+        "profit_factor": 0.37,
+        "sharpe_per_trade": -0.3824,
+        "t_stat": -3.01,
+        "max_drawdown_usd": -84.58,
+        "exits": {
+          "time": 60,
+          "sl": 2
+        }
+      },
+      "mean_spread_usd": 0.863,
+      "mean_r_multiple": -0.1086
+    }
+  }
+}

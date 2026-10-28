@@ -5,15 +5,30 @@
 !.env.example
 
 # --- Runtime state (bot writes these locally) ---
+manual_exceptions.txt
+telegram_update_offset.txt
 bot_state.json
+ladder_state.json
+ladder_state.json.tmp
+kill_switch.halt
+kill_switch.halt.tmp
+kill_switch.clear
+swing_state.json
+swing_state.json.tmp
+swing_kill_switch.halt
+swing_kill_switch.halt.tmp
 symbol_config_overlay.json
 symbol_config_overlay.json-old
 regime_apply_audit.jsonl
+ev_buckets.json
 trades.log
 trades_watcher.log
 *.log
 Files/
 logs/
+
+# --- graphify knowledge graph (machine-local, rebuild with `graphify update .`) ---
+graphify-out/
 
 # --- Python bytecode / caches ---
 __pycache__/
@@ -32,7 +47,9 @@ venv/
 # --- Generated backtest / scan / replay dumps ---
 *.jsonl
 session_replay_results.jsonl
+trading/backtest/data/
 docs/mejoras/otros instrumentos/deep-analysis/results/
+trading/backtest/channel_cache/*.json
 
 # --- Local backups (git history is the backup) ---
 *_old.py
@@ -67,7 +84,18 @@ docs/mejoras/bots/inbox_positions/*.csv
 docs/mejoras/bots/mql5_crawl/positions_csv/
 docs/mejoras/bots/*.positions.csv
 
-# --- OS / editor ---
+*.session
+*.session-journal
+sesion_exportar.session
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Estado del swing en Exness (runtime, como swing_state.json)
+swing_exness_state.json
+swing_exness_state.json.tmp
+swing_exness_kill_switch.halt
+# Material de terceros: libros escaneados, PDFs y el volcado del canal de Telegram
+docs/*.pdf
+docs/WhatsApp Image *.jpeg
+historial_canal*.txt

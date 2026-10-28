@@ -2,4 +2,6 @@ MetaTrader5
 Flask
 python-dotenv
 yfinance
-
+psycopg[binary]
+psycopg-pool
+redis

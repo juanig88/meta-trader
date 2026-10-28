@@ -40,6 +40,18 @@ Configurations should be secure without requiring additional hardening. Insecure
 - Verify SSL/TLS connections to data endpoints
 - Consider IP whitelisting if supported by data providers
 
+#### CCXT MCP (official `ccxt-mcp`)
+- Configure in `.cursor/mcp.json` via `trading/infrastructure/mcp/run_ccxt_mcp.py` — never put keys in `mcp.json`
+- Load optional `CCXT_MCP_APIKEY` / `CCXT_MCP_SECRET` from `.env` (gitignored)
+- The launcher **strips** `MT5_*`, `TELEGRAM_*`, and other secret-looking keys before spawning Node
+- Trading is forced off (`CCXT_MCP_TRADING=0`); this MCP is market data / private reads only
+- Exchange API keys should be trade-only if used at all (no withdrawal) and IP-allowlisted
+
+#### Local trading MCP (`local-trading`)
+- Read-only snapshot of `bot_state.json` and `trades.log`
+- Does **not** receive MT5 passwords and cannot place orders
+- Secret-looking JSON keys in bot state are redacted before they reach the model
+
 #### GitHub MCP
 - Requires Personal Access Token (PAT) with scoped permissions
 - Minimum required scopes: `repo` (for private repos), `read:org`

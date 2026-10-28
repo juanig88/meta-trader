@@ -1,0 +1,664 @@
+{
+  "question": "tiene el consenso 4/5 ventaja bruta a horizontes mas largos?",
+  "source": "Yahoo 1m (M5/M15/H4 resampleados) + spread XBTFX por hora UTC",
+  "entry": "evaluate_symbol vivo, Kelly 0.50, stop min(money, 5%), gate de spread 10%",
+  "symbols": 12,
+  "pooled": {
+    "5": {
+      "n": 350,
+      "net_per_trade": -0.0115,
+      "win_rate_pct": 18.0,
+      "profit_factor": 0.141,
+      "t_stat_net": -10.53,
+      "gross_per_trade": 0.0005,
+      "t_stat_gross": 0.52,
+      "mean_spread_usd": 0.0119,
+      "mirror_per_trade": -0.0124,
+      "first_half_net": -0.0145,
+      "second_half_net": -0.0085,
+      "max_drawdown_usd": -4.01,
+      "exits": {
+        "time": 350
+      }
+    },
+    "240": {
+      "n": 269,
+      "net_per_trade": -0.0086,
+      "win_rate_pct": 39.4,
+      "profit_factor": 0.809,
+      "t_stat_net": -1.04,
+      "gross_per_trade": 0.0035,
+      "t_stat_gross": 0.43,
+      "mean_spread_usd": 0.0121,
+      "mirror_per_trade": -0.0133,
+      "first_half_net": -0.0128,
+      "second_half_net": -0.0043,
+      "max_drawdown_usd": -3.12,
+      "exits": {
+        "time": 251,
+        "sl": 5,
+        "tp": 13
+      }
+    },
+    "1440": {
+      "n": 137,
+      "net_per_trade": 0.0108,
+      "win_rate_pct": 44.5,
+      "profit_factor": 1.144,
+      "t_stat_net": 0.56,
+      "gross_per_trade": 0.0228,
+      "t_stat_gross": 1.17,
+      "mean_spread_usd": 0.0119,
+      "mirror_per_trade": -0.0333,
+      "first_half_net": 0.0096,
+      "second_half_net": 0.0121,
+      "max_drawdown_usd": -1.28,
+      "exits": {
+        "time": 82,
+        "sl": 28,
+        "tp": 27
+      }
+    }
+  },
+  "per_symbol": {
+    "ADAUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1369,
+      "sendable": 46,
+      "by_hold": {
+        "5": {
+          "n": 44,
+          "net_per_trade": -0.008,
+          "win_rate_pct": 29.5,
+          "profit_factor": 0.31,
+          "t_stat_net": -3.12,
+          "gross_per_trade": 0.0019,
+          "t_stat_gross": 0.73,
+          "mean_spread_usd": 0.01,
+          "mirror_per_trade": -0.0119,
+          "first_half_net": -0.0059,
+          "second_half_net": -0.0102,
+          "max_drawdown_usd": -0.35,
+          "exits": {
+            "time": 44
+          }
+        },
+        "240": {
+          "n": 32,
+          "net_per_trade": 0.0107,
+          "win_rate_pct": 56.2,
+          "profit_factor": 1.25,
+          "t_stat_net": 0.47,
+          "gross_per_trade": 0.0206,
+          "t_stat_gross": 0.91,
+          "mean_spread_usd": 0.0099,
+          "mirror_per_trade": -0.0284,
+          "first_half_net": 0.0099,
+          "second_half_net": 0.0115,
+          "max_drawdown_usd": -0.47,
+          "exits": {
+            "time": 29,
+            "sl": 1,
+            "tp": 2
+          }
+        },
+        "1440": {
+          "n": 18,
+          "net_per_trade": 0.055,
+          "win_rate_pct": 72.2,
+          "profit_factor": 1.739,
+          "t_stat_net": 1.05,
+          "gross_per_trade": 0.0648,
+          "t_stat_gross": 1.24,
+          "mean_spread_usd": 0.0098,
+          "mirror_per_trade": -0.0648,
+          "first_half_net": 0.025,
+          "second_half_net": 0.085,
+          "max_drawdown_usd": -0.44,
+          "exits": {
+            "time": 9,
+            "sl": 4,
+            "tp": 5
+          }
+        }
+      }
+    },
+    "ATMUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1016,
+      "sendable": 0,
+      "by_hold": {
+        "5": {
+          "n": 0
+        },
+        "240": {
+          "n": 0
+        },
+        "1440": {
+          "n": 0
+        }
+      }
+    },
+    "AVAUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1292,
+      "sendable": 13,
+      "by_hold": {
+        "5": {
+          "n": 13,
+          "net_per_trade": -0.0218,
+          "win_rate_pct": 7.7,
+          "profit_factor": 0.025,
+          "t_stat_net": -6.66,
+          "gross_per_trade": 0.0049,
+          "t_stat_gross": 1.7,
+          "mean_spread_usd": 0.0267,
+          "mirror_per_trade": -0.0316,
+          "first_half_net": -0.0268,
+          "second_half_net": -0.0176,
+          "max_drawdown_usd": -0.29,
+          "exits": {
+            "time": 13
+          }
+        },
+        "240": {
+          "n": 10,
+          "net_per_trade": 0.0111,
+          "win_rate_pct": 60.0,
+          "profit_factor": 1.247,
+          "t_stat_net": 0.29,
+          "gross_per_trade": 0.0377,
+          "t_stat_gross": 1.01,
+          "mean_spread_usd": 0.0266,
+          "mirror_per_trade": -0.0636,
+          "first_half_net": -0.0259,
+          "second_half_net": 0.048,
+          "max_drawdown_usd": -0.27,
+          "exits": {
+            "time": 10
+          }
+        },
+        "1440": {
+          "n": 5,
+          "net_per_trade": 0.0858,
+          "win_rate_pct": 60.0,
+          "profit_factor": 1.788,
+          "t_stat_net": 0.65,
+          "gross_per_trade": 0.1152,
+          "t_stat_gross": 0.87,
+          "mean_spread_usd": 0.0294,
+          "mirror_per_trade": -0.1215,
+          "first_half_net": 0.038,
+          "second_half_net": 0.1177,
+          "max_drawdown_usd": -0.54,
+          "exits": {
+            "time": 2,
+            "sl": 1,
+            "tp": 2
+          }
+        }
+      }
+    },
+    "BCHUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1244,
+      "sendable": 25,
+      "by_hold": {
+        "5": {
+          "n": 25,
+          "net_per_trade": -0.0066,
+          "win_rate_pct": 12.0,
+          "profit_factor": 0.338,
+          "t_stat_net": -2.05,
+          "gross_per_trade": 0.0025,
+          "t_stat_gross": 0.76,
+          "mean_spread_usd": 0.0091,
+          "mirror_per_trade": -0.0115,
+          "first_half_net": -0.0034,
+          "second_half_net": -0.0096,
+          "max_drawdown_usd": -0.19,
+          "exits": {
+            "time": 25
+          }
+        },
+        "240": {
+          "n": 22,
+          "net_per_trade": -0.0289,
+          "win_rate_pct": 22.7,
+          "profit_factor": 0.33,
+          "t_stat_net": -1.88,
+          "gross_per_trade": -0.0198,
+          "t_stat_gross": -1.29,
+          "mean_spread_usd": 0.0091,
+          "mirror_per_trade": 0.0132,
+          "first_half_net": -0.0272,
+          "second_half_net": -0.0305,
+          "max_drawdown_usd": -0.71,
+          "exits": {
+            "time": 19,
+            "tp": 2,
+            "sl": 1
+          }
+        },
+        "1440": {
+          "n": 12,
+          "net_per_trade": -0.0134,
+          "win_rate_pct": 25.0,
+          "profit_factor": 0.653,
+          "t_stat_net": -0.55,
+          "gross_per_trade": -0.0043,
+          "t_stat_gross": -0.18,
+          "mean_spread_usd": 0.0091,
+          "mirror_per_trade": -0.0078,
+          "first_half_net": -0.0247,
+          "second_half_net": -0.0021,
+          "max_drawdown_usd": -0.28,
+          "exits": {
+            "sl": 2,
+            "time": 8,
+            "tp": 2
+          }
+        }
+      }
+    },
+    "DOGUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1325,
+      "sendable": 38,
+      "by_hold": {
+        "5": {
+          "n": 38,
+          "net_per_trade": -0.0039,
+          "win_rate_pct": 34.2,
+          "profit_factor": 0.528,
+          "t_stat_net": -1.63,
+          "gross_per_trade": 0.0062,
+          "t_stat_gross": 2.57,
+          "mean_spread_usd": 0.0101,
+          "mirror_per_trade": -0.0163,
+          "first_half_net": -0.0059,
+          "second_half_net": -0.0018,
+          "max_drawdown_usd": -0.18,
+          "exits": {
+            "time": 38
+          }
+        },
+        "240": {
+          "n": 27,
+          "net_per_trade": 0.0081,
+          "win_rate_pct": 33.3,
+          "profit_factor": 1.224,
+          "t_stat_net": 0.36,
+          "gross_per_trade": 0.0182,
+          "t_stat_gross": 0.81,
+          "mean_spread_usd": 0.0101,
+          "mirror_per_trade": -0.0276,
+          "first_half_net": 0.0358,
+          "second_half_net": -0.0176,
+          "max_drawdown_usd": -0.55,
+          "exits": {
+            "time": 26,
+            "tp": 1
+          }
+        },
+        "1440": {
+          "n": 16,
+          "net_per_trade": -0.0354,
+          "win_rate_pct": 25.0,
+          "profit_factor": 0.653,
+          "t_stat_net": -0.64,
+          "gross_per_trade": -0.0257,
+          "t_stat_gross": -0.46,
+          "mean_spread_usd": 0.0098,
+          "mirror_per_trade": 0.0212,
+          "first_half_net": -0.0128,
+          "second_half_net": -0.0581,
+          "max_drawdown_usd": -0.88,
+          "exits": {
+            "sl": 4,
+            "time": 10,
+            "tp": 2
+          }
+        }
+      }
+    },
+    "DOTUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1188,
+      "sendable": 30,
+      "by_hold": {
+        "5": {
+          "n": 29,
+          "net_per_trade": -0.0201,
+          "win_rate_pct": 10.3,
+          "profit_factor": 0.066,
+          "t_stat_net": -6.26,
+          "gross_per_trade": -0.0007,
+          "t_stat_gross": -0.21,
+          "mean_spread_usd": 0.0194,
+          "mirror_per_trade": -0.0188,
+          "first_half_net": -0.0228,
+          "second_half_net": -0.0176,
+          "max_drawdown_usd": -0.58,
+          "exits": {
+            "time": 29
+          }
+        },
+        "240": {
+          "n": 23,
+          "net_per_trade": -0.028,
+          "win_rate_pct": 39.1,
+          "profit_factor": 0.582,
+          "t_stat_net": -1.05,
+          "gross_per_trade": -0.0082,
+          "t_stat_gross": -0.31,
+          "mean_spread_usd": 0.0198,
+          "mirror_per_trade": -0.0102,
+          "first_half_net": -0.0635,
+          "second_half_net": 0.0046,
+          "max_drawdown_usd": -0.98,
+          "exits": {
+            "time": 22,
+            "tp": 1
+          }
+        },
+        "1440": {
+          "n": 13,
+          "net_per_trade": -0.0032,
+          "win_rate_pct": 53.8,
+          "profit_factor": 0.97,
+          "t_stat_net": -0.05,
+          "gross_per_trade": 0.0153,
+          "t_stat_gross": 0.23,
+          "mean_spread_usd": 0.0185,
+          "mirror_per_trade": -0.0149,
+          "first_half_net": 0.0587,
+          "second_half_net": -0.0563,
+          "max_drawdown_usd": -0.58,
+          "exits": {
+            "tp": 4,
+            "sl": 3,
+            "time": 6
+          }
+        }
+      }
+    },
+    "ETHUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1476,
+      "sendable": 53,
+      "by_hold": {
+        "5": {
+          "n": 52,
+          "net_per_trade": -0.037,
+          "win_rate_pct": 11.5,
+          "profit_factor": 0.054,
+          "t_stat_net": -8.69,
+          "gross_per_trade": -0.0042,
+          "t_stat_gross": -0.98,
+          "mean_spread_usd": 0.0328,
+          "mirror_per_trade": -0.0287,
+          "first_half_net": -0.0384,
+          "second_half_net": -0.0355,
+          "max_drawdown_usd": -1.92,
+          "exits": {
+            "time": 52
+          }
+        },
+        "240": {
+          "n": 41,
+          "net_per_trade": -0.0386,
+          "win_rate_pct": 39.0,
+          "profit_factor": 0.705,
+          "t_stat_net": -0.92,
+          "gross_per_trade": -0.0058,
+          "t_stat_gross": -0.14,
+          "mean_spread_usd": 0.0328,
+          "mirror_per_trade": -0.0174,
+          "first_half_net": -0.0556,
+          "second_half_net": -0.0224,
+          "max_drawdown_usd": -2.23,
+          "exits": {
+            "time": 35,
+            "sl": 3,
+            "tp": 3
+          }
+        },
+        "1440": {
+          "n": 19,
+          "net_per_trade": 0.072,
+          "win_rate_pct": 63.2,
+          "profit_factor": 1.454,
+          "t_stat_net": 0.75,
+          "gross_per_trade": 0.1048,
+          "t_stat_gross": 1.09,
+          "mean_spread_usd": 0.0328,
+          "mirror_per_trade": -0.1577,
+          "first_half_net": 0.0327,
+          "second_half_net": 0.1074,
+          "max_drawdown_usd": -0.5,
+          "exits": {
+            "sl": 6,
+            "tp": 7,
+            "time": 6
+          }
+        }
+      }
+    },
+    "FILUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1072,
+      "sendable": 0,
+      "by_hold": {
+        "5": {
+          "n": 0
+        },
+        "240": {
+          "n": 0
+        },
+        "1440": {
+          "n": 0
+        }
+      }
+    },
+    "LNKUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1462,
+      "sendable": 0,
+      "by_hold": {
+        "5": {
+          "n": 0
+        },
+        "240": {
+          "n": 0
+        },
+        "1440": {
+          "n": 0
+        }
+      }
+    },
+    "LTCUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1298,
+      "sendable": 61,
+      "by_hold": {
+        "5": {
+          "n": 58,
+          "net_per_trade": -0.0026,
+          "win_rate_pct": 1.7,
+          "profit_factor": 0.012,
+          "t_stat_net": -11.16,
+          "gross_per_trade": -0.0004,
+          "t_stat_gross": -1.77,
+          "mean_spread_usd": 0.0022,
+          "mirror_per_trade": -0.0018,
+          "first_half_net": -0.0022,
+          "second_half_net": -0.003,
+          "max_drawdown_usd": -0.15,
+          "exits": {
+            "time": 58
+          }
+        },
+        "240": {
+          "n": 44,
+          "net_per_trade": -0.0019,
+          "win_rate_pct": 25.0,
+          "profit_factor": 0.589,
+          "t_stat_net": -1.17,
+          "gross_per_trade": 0.0003,
+          "t_stat_gross": 0.18,
+          "mean_spread_usd": 0.0022,
+          "mirror_per_trade": -0.0023,
+          "first_half_net": -0.0026,
+          "second_half_net": -0.0013,
+          "max_drawdown_usd": -0.08,
+          "exits": {
+            "time": 42,
+            "tp": 2
+          }
+        },
+        "1440": {
+          "n": 18,
+          "net_per_trade": -0.0097,
+          "win_rate_pct": 27.8,
+          "profit_factor": 0.241,
+          "t_stat_net": -2.36,
+          "gross_per_trade": -0.0075,
+          "t_stat_gross": -1.82,
+          "mean_spread_usd": 0.0022,
+          "mirror_per_trade": 0.0046,
+          "first_half_net": 0.0033,
+          "second_half_net": -0.0226,
+          "max_drawdown_usd": -0.21,
+          "exits": {
+            "time": 12,
+            "tp": 1,
+            "sl": 5
+          }
+        }
+      }
+    },
+    "SOLUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1426,
+      "sendable": 46,
+      "by_hold": {
+        "5": {
+          "n": 46,
+          "net_per_trade": -0.0013,
+          "win_rate_pct": 26.1,
+          "profit_factor": 0.163,
+          "t_stat_net": -5.06,
+          "gross_per_trade": 0.0002,
+          "t_stat_gross": 0.85,
+          "mean_spread_usd": 0.0015,
+          "mirror_per_trade": -0.0017,
+          "first_half_net": -0.0016,
+          "second_half_net": -0.001,
+          "max_drawdown_usd": -0.06,
+          "exits": {
+            "time": 46
+          }
+        },
+        "240": {
+          "n": 36,
+          "net_per_trade": -0.0026,
+          "win_rate_pct": 33.3,
+          "profit_factor": 0.608,
+          "t_stat_net": -1.06,
+          "gross_per_trade": -0.0011,
+          "t_stat_gross": -0.46,
+          "mean_spread_usd": 0.0015,
+          "mirror_per_trade": -0.0003,
+          "first_half_net": 0.0003,
+          "second_half_net": -0.0055,
+          "max_drawdown_usd": -0.12,
+          "exits": {
+            "time": 35,
+            "tp": 1
+          }
+        },
+        "1440": {
+          "n": 19,
+          "net_per_trade": -0.001,
+          "win_rate_pct": 36.8,
+          "profit_factor": 0.913,
+          "t_stat_net": -0.15,
+          "gross_per_trade": 0.0005,
+          "t_stat_gross": 0.08,
+          "mean_spread_usd": 0.0015,
+          "mirror_per_trade": -0.0015,
+          "first_half_net": 0.0007,
+          "second_half_net": -0.0025,
+          "max_drawdown_usd": -0.13,
+          "exits": {
+            "time": 16,
+            "tp": 2,
+            "sl": 1
+          }
+        }
+      }
+    },
+    "XRPUSD!": {
+      "days": 29.0,
+      "fires_4_5": 1390,
+      "sendable": 45,
+      "by_hold": {
+        "5": {
+          "n": 45,
+          "net_per_trade": -0.0078,
+          "win_rate_pct": 24.4,
+          "profit_factor": 0.185,
+          "t_stat_net": -4.02,
+          "gross_per_trade": -0.0008,
+          "t_stat_gross": -0.42,
+          "mean_spread_usd": 0.007,
+          "mirror_per_trade": -0.0062,
+          "first_half_net": -0.0056,
+          "second_half_net": -0.0098,
+          "max_drawdown_usd": -0.36,
+          "exits": {
+            "time": 45
+          }
+        },
+        "240": {
+          "n": 34,
+          "net_per_trade": 0.0018,
+          "win_rate_pct": 58.8,
+          "profit_factor": 1.064,
+          "t_stat_net": 0.12,
+          "gross_per_trade": 0.0088,
+          "t_stat_gross": 0.57,
+          "mean_spread_usd": 0.007,
+          "mirror_per_trade": -0.0154,
+          "first_half_net": 0.0341,
+          "second_half_net": -0.0304,
+          "max_drawdown_usd": -0.68,
+          "exits": {
+            "time": 33,
+            "tp": 1
+          }
+        },
+        "1440": {
+          "n": 17,
+          "net_per_trade": -0.0202,
+          "win_rate_pct": 41.2,
+          "profit_factor": 0.759,
+          "t_stat_net": -0.46,
+          "gross_per_trade": -0.0134,
+          "t_stat_gross": -0.31,
+          "mean_spread_usd": 0.0068,
+          "mirror_per_trade": 0.006,
+          "first_half_net": -0.0084,
+          "second_half_net": -0.0308,
+          "max_drawdown_usd": -0.52,
+          "exits": {
+            "time": 13,
+            "sl": 2,
+            "tp": 2
+          }
+        }
+      }
+    }
+  }
+}

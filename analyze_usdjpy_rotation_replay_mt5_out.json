@@ -1,0 +1,198 @@
+{
+  "symbol": "USDJPY.",
+  "source": "XBTFX MT5 terminal cache (server clock = UTC)",
+  "range_utc": [
+    "2026-09-30 06:03",
+    "2026-10-05 18:15"
+  ],
+  "m1_bars": 5000,
+  "calendar_days": 5.5,
+  "contract": {
+    "point": 0.001,
+    "contract_size": 100000.0,
+    "volume_min": 0.01,
+    "live_spread_pts": 19,
+    "xbtfx_spread_p90_pts": 22.0
+  },
+  "bar_spread_pts": {
+    "median": 17.0,
+    "p90": 22.0,
+    "min": 17.0
+  },
+  "fires_4_5": 564,
+  "fires_per_day": 102.4,
+  "fire_outcome": {
+    "dispara": 23,
+    "sin_pullback": 423,
+    "slot_ocupado": 6,
+    "murphy_climax": 28,
+    "veto_htf": 84
+  },
+  "spread_gate_pass": 0,
+  "trades_bar_spread": {
+    "n": 23,
+    "win_rate_pct": 30.4,
+    "total_usd": -4.57,
+    "mean_usd": -0.1989,
+    "median_usd": -0.2531,
+    "profit_factor": 0.146,
+    "sharpe_per_trade": -0.8311,
+    "t_stat": -3.99,
+    "max_drawdown_usd": -4.57,
+    "exits": {
+      "time": 18,
+      "sl": 5
+    }
+  },
+  "trades_bar_spread_gross": {
+    "n": 23,
+    "win_rate_pct": 43.5,
+    "total_usd": -0.98,
+    "mean_usd": -0.0425,
+    "median_usd": -0.076,
+    "profit_factor": 0.695,
+    "sharpe_per_trade": -0.1534,
+    "t_stat": -0.74,
+    "max_drawdown_usd": -1.37,
+    "exits": {
+      "time": 18,
+      "sl": 5
+    }
+  },
+  "trades_spread_p90_floor": {
+    "n": 23,
+    "win_rate_pct": 21.7,
+    "total_usd": -5.09,
+    "mean_usd": -0.2214,
+    "median_usd": -0.2847,
+    "profit_factor": 0.109,
+    "sharpe_per_trade": -0.956,
+    "t_stat": -4.58,
+    "max_drawdown_usd": -5.09,
+    "exits": {
+      "time": 18,
+      "sl": 5
+    }
+  },
+  "mirror_side_bar_spread": {
+    "n": 23,
+    "win_rate_pct": 47.8,
+    "total_usd": -1.75,
+    "mean_usd": -0.0761,
+    "median_usd": -0.0317,
+    "profit_factor": 0.524,
+    "sharpe_per_trade": -0.2704,
+    "t_stat": -1.3,
+    "max_drawdown_usd": -2.56,
+    "exits": {
+      "time": 18,
+      "sl": 5
+    }
+  },
+  "first_half": {
+    "n": 11,
+    "win_rate_pct": 36.4,
+    "total_usd": -1.91,
+    "mean_usd": -0.1734,
+    "median_usd": -0.1784,
+    "profit_factor": 0.21,
+    "sharpe_per_trade": -0.6662,
+    "t_stat": -2.21,
+    "max_drawdown_usd": -1.91,
+    "exits": {
+      "time": 8,
+      "sl": 3
+    }
+  },
+  "second_half": {
+    "n": 12,
+    "win_rate_pct": 25.0,
+    "total_usd": -2.67,
+    "mean_usd": -0.2222,
+    "median_usd": -0.266,
+    "profit_factor": 0.093,
+    "sharpe_per_trade": -1.0307,
+    "t_stat": -3.57,
+    "max_drawdown_usd": -2.67,
+    "exits": {
+      "sl": 2,
+      "time": 10
+    }
+  },
+  "agree_4": {
+    "n": 21,
+    "win_rate_pct": 33.3,
+    "total_usd": -4.04,
+    "mean_usd": -0.1925,
+    "median_usd": -0.1838,
+    "profit_factor": 0.162,
+    "sharpe_per_trade": -0.7716,
+    "t_stat": -3.54,
+    "max_drawdown_usd": -4.04,
+    "exits": {
+      "time": 16,
+      "sl": 5
+    }
+  },
+  "agree_5": {
+    "n": 2,
+    "win_rate_pct": 0.0,
+    "total_usd": -0.53,
+    "mean_usd": -0.266,
+    "median_usd": -0.266,
+    "profit_factor": 0.0,
+    "sharpe_per_trade": -20.5473,
+    "t_stat": -29.06,
+    "max_drawdown_usd": -0.53,
+    "exits": {
+      "time": 2
+    }
+  },
+  "buy": {
+    "n": 11,
+    "win_rate_pct": 27.3,
+    "total_usd": -1.93,
+    "mean_usd": -0.1752,
+    "median_usd": -0.1838,
+    "profit_factor": 0.141,
+    "sharpe_per_trade": -0.8159,
+    "t_stat": -2.71,
+    "max_drawdown_usd": -1.93,
+    "exits": {
+      "time": 9,
+      "sl": 2
+    }
+  },
+  "sell": {
+    "n": 12,
+    "win_rate_pct": 33.3,
+    "total_usd": -2.65,
+    "mean_usd": -0.2205,
+    "median_usd": -0.3041,
+    "profit_factor": 0.149,
+    "sharpe_per_trade": -0.8554,
+    "t_stat": -2.96,
+    "max_drawdown_usd": -2.65,
+    "exits": {
+      "time": 9,
+      "sl": 3
+    }
+  },
+  "vetoed_by_gates_bar_spread_overlapping": {
+    "n": 535,
+    "win_rate_pct": 25.4,
+    "total_usd": -82.97,
+    "mean_usd": -0.1551,
+    "median_usd": -0.1584,
+    "profit_factor": 0.22,
+    "sharpe_per_trade": -0.612,
+    "t_stat": -14.16,
+    "max_drawdown_usd": -82.97,
+    "exits": {
+      "time": 426,
+      "sl": 88,
+      "tp": 21
+    }
+  },
+  "mean_spread_usd": 0.1563
+}

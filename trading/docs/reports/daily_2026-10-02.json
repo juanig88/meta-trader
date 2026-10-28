@@ -1,0 +1,105 @@
+{
+  "day": "2026-10-02",
+  "sources": [
+    "logs\\trades_2026-10-03_092030.log",
+    "logs\\trades_2026-10-03_093214.log",
+    "logs\\trades_2026-10-03_095118.log",
+    "logs\\trades_2026-10-03_141251.log",
+    "logs\\trades_watcher_2026-08-29_125854.log",
+    "logs\\trades_watcher_2026-08-29_133418.log",
+    "logs\\trades_watcher_2026-09-01_120613.log",
+    "logs\\trades_watcher_2026-09-01_121502.log",
+    "logs\\trades_watcher_2026-09-01_123444.log",
+    "logs\\trades_watcher_2026-09-03_135327.log",
+    "logs\\trades_watcher_2026-09-03_135722.log",
+    "logs\\trades_watcher_2026-09-09_094133.log",
+    "logs\\trades_watcher_2026-09-14_121015.log",
+    "logs\\trades_watcher_2026-09-15_092056.log",
+    "logs\\trades_watcher_2026-09-15_114448.log",
+    "logs\\trades_watcher_2026-09-17_103546.log",
+    "logs\\trades_watcher_2026-09-18_121431.log",
+    "logs\\trades_watcher_2026-09-18_135618.log",
+    "logs\\trades_watcher_2026-09-18_161333.log",
+    "logs\\trades_watcher_2026-09-22_123326.log",
+    "logs\\trades_watcher_2026-09-23_120930.log",
+    "logs\\trades_watcher_2026-09-24_105250.log",
+    "logs\\trades_watcher_2026-09-24_115924.log",
+    "logs\\trades_watcher_2026-09-24_143805.log",
+    "logs\\trades_watcher_2026-09-27_223013.log",
+    "logs\\trades_watcher_2026-09-28_094317.log",
+    "logs\\trades_watcher_2026-09-28_095149.log",
+    "logs\\trades_watcher_2026-09-28_122046.log",
+    "logs\\trades_watcher_2026-09-28_143855.log",
+    "logs\\trades_watcher_2026-09-29_113200.log",
+    "trades.log"
+  ],
+  "pnl_source": "broker",
+  "n_signals": 1416,
+  "n_opens": 551,
+  "rejects": {
+    "spread_caro": 754,
+    "spread_cubre_stop": 111
+  },
+  "closes": {
+    "n": 552,
+    "pnl": -10.1006,
+    "wins": 224,
+    "losses": 290,
+    "flat": 38,
+    "win_rate": 0.4358,
+    "profit_factor": 0.4448,
+    "largest_loss": -0.5101,
+    "largest_win": 0.3458,
+    "mean_net": -0.018298
+  },
+  "log_closes": {
+    "n": 407,
+    "pnl": -12.1328,
+    "wins": 131,
+    "losses": 276,
+    "flat": 0,
+    "win_rate": 0.3219,
+    "profit_factor": 0.3244,
+    "largest_loss": -0.5101,
+    "largest_win": 0.3458,
+    "mean_net": -0.02981
+  },
+  "log_vs_broker": {
+    "n_broker": 552,
+    "n_log": 407,
+    "n_both": 407,
+    "sum_log_on_both": -12.1328,
+    "sum_broker_on_both": -12.2759
+  },
+  "kill_switch": {},
+  "calibration": {
+    "scope": "sent_consensus",
+    "n_matched": 2527,
+    "questions": {
+      "alpha_would_avoid_predicts_loss": {
+        "n": 730,
+        "brier": 0.447945,
+        "brier_skill": -1.3032,
+        "sufficient": true,
+        "gate_discussable": false
+      },
+      "murphy_would_veto_predicts_loss": {
+        "n": 730,
+        "brier": 0.569863,
+        "brier_skill": -1.9301,
+        "sufficient": true,
+        "gate_discussable": false
+      },
+      "consensus_share_predicts_win": {
+        "n": 730,
+        "brier": 0.502466,
+        "brier_skill": -1.6749,
+        "sufficient": true,
+        "gate_discussable": null
+      }
+    }
+  },
+  "gemini_latency_ms": null,
+  "gemini_cost": null,
+  "live_gate": false
+}

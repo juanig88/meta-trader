@@ -1,0 +1,38 @@
+# .gitignore is already respected; these are extra exclusions for the graph.
+
+# Secrets (never index, even if .gitignore changes)
+.env
+.env.*
+.env-*
+*.session
+*.session-journal
+**/cookies.txt
+
+# Bot runtime state and dumps
+bot_state.json
+ev_buckets.json
+symbol_config_overlay.json*
+manual_exceptions.txt
+telegram_update_offset.txt
+historial_canal*.txt
+*_out.json
+*_summary.json
+*.csv
+*.log
+*.jsonl
+
+# Third-party / scraped material and other agents' config
+/docs/
+*.min.js
+*.cjs
+.claude/
+.clawhub/
+.clinerules/
+
+# Build / tooling
+node_modules/
+.next/
+dist/
+__pycache__/
+.pytest_cache/
+graphify-out/

@@ -1,5 +1,7 @@
 # XAUUSD Parallel Strategy - Project Status Summary
 
+> **Not the live bot.** Since 2026-10-07 the running engine is the daily Donchian 20/10 + SMA200 swing (`swing_daily.py`, `trading/docs/SWING_ENGINE.md`); the crypto rotation is stopped. The XAU items below are a frozen worklog.
+
 ## Current State Overview
 
 ### ✅ COMPLETED TASKS
