@@ -1,164 +1,170 @@
 # MetaTrader 5 Python Bot
 
-Bot de trading para **MetaTrader 5** usando la librería oficial `MetaTrader5` (Python).  
-Se ejecuta en tu PC con MT5 abierto y logueado.
+Bot e investigación de trading en crypto para **MetaTrader 5**, con la librería oficial `MetaTrader5` de Python. Corre en tu PC con MT5 abierto y logueado. **Solo cuentas demo.**
 
-**Motor vivo (desde 2026-10-07):** swing diario **Donchian 20/10 + SMA200**, solo compras, sobre 79 crypto CFD en **demo XBTFX** (`swing_daily.py`, magic 260501). Decide una vez por día después del cierre diario (00:10 UTC). Runbook, evidencia y backtests Vibe + QuantConnect: [`trading/docs/SWING_ENGINE.md`](trading/docs/SWING_ENGINE.md). Contexto para agentes: [`AGENTS.md`](AGENTS.md).
+Contexto para agentes: [`AGENTS.md`](AGENTS.md). Lo que ya se midió y no hay que volver a proponer: [`trading/docs/ESTABLISHED_FACTS.md`](trading/docs/ESTABLISHED_FACTS.md).
 
-**Rotación (`bot_mt5.py`): apagada desde 2026-10-07** porque no ganaba (antes del spread su resultado era cero). Queda detenida con `kill_switch.halt` (reason `rotacion_reemplazada_por_swing`). Su documentación sigue en [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md) como registro.
+## Estado al 2026-10-28
+
+- **Bróker:** Exness, cuenta demo (`Exness-MT5Trial11`), símbolos `BTCUSDm` y `ETHUSDm`. Antes era XBTFX demo; desde el 2026-10-10 la terminal es Exness.
+- **Ningún motor manda órdenes hoy.**
+
+| Pieza | Qué hace | Estado |
+|---|---|---|
+| `swing_daily.py` | Swing diario Donchian 20/10 + SMA200, solo compras | **Dry-run en Exness** (forzado en el código). En XBTFX está aprobado para demo. |
+| `chequeo_previo.py` | Chequeo antes de cada operación manual y diario (`DIARIO.md`) | En uso. Solo lee MT5. |
+| `record_binance_book.py` | Graba el libro de órdenes público de Binance BTCUSDT | Grabando desde 2026-10-27 para una medición futura |
+| `murphy_dry.py` | Lector del capítulo 4 de Murphy sobre el diario de BTC y ETH | Solo lectura |
+| `bot_mt5.py` | Rotación intradía de 79 crypto, 4 de 5 módulos | **Apagada** desde 2026-10-07 |
+
+## Qué aprendimos
+
+Todo está medido con datos, costos reales y, cuando corresponde, con pre-registro y holdout. El detalle está en [`trading/docs/INTRADIA_EXNESS.md`](trading/docs/INTRADIA_EXNESS.md) y en `ESTABLISHED_FACTS.md`.
+
+- **Intradía (M1 a M30) en BTC:** ninguna regla acierta la dirección lo suficiente para pagar el spread. Se probaron:
+  - la rotación de 5 módulos
+  - la regla de retroceso de Murphy
+  - un zigzag de "tendencia que ya se ve"
+  - rupturas con EMA20 y volumen
+  - el flujo agresor de Binance
+  - el chequeo previo convertido en bot
+- **La única señal que se replica fuera de muestra** es la reversión corta: después de un movimiento fuerte de 5–15 min, el precio devuelve algo en los 15–30 min siguientes. Da +0.5 a +1.0 bps antes de costos, menos que el spread de Exness (1.18 bps).
+- **El costo depende del bróker:** en Exness, el spread de BTC es 0.17× el movimiento típico de 5 min; en XBTFX era 1.3×. Pero un costo bajo no crea una ventaja.
+- **Stop y take profit no crean ventaja.** Con entradas al azar, el win rate sale del cociente SL/(SL+TP) y el resultado esperado es cero. Lo único que importa es que la entrada acierte la dirección.
+- **Diario, solo compras, siguiendo la tendencia:** es lo único que pasó todas las pruebas. Es el swing.
 
 ## Requisitos
 
-- Windows + MetaTrader 5 instalado
-- Python 3.10+ recomendado
-- MT5 abierto y con tu cuenta iniciada
-
-## Instalación
+- Windows y MetaTrader 5 instalado, abierto y logueado en una cuenta demo
+- Python 3.10 o superior
 
 ```powershell
 py -m pip install -r requirements.txt
 ```
 
-## Configuración (credenciales y bot)
+## Configuración
 
-1) Instalá dependencias (incluye `python-dotenv`):
+Copiá `.env.example` a `.env` y completá `MT5_LOGIN`, `MT5_PASSWORD` y `MT5_SERVER`. El bot carga `.env` al arrancar y no pisa las variables que ya definiste en PowerShell. La lista completa de opciones está en `.env.example`; las del swing están en la sección N.
+
+Variables del swing:
+
+| Variable | Default | Qué hace |
+|---|---|---|
+| `BOT_SWING_DRY_RUN` / `BOT_SWING_DEMO_LIVE` | `1` / `0` | Para mandar órdenes hacen falta `0` y `1`. **En Exness se ignoran:** siempre es dry-run. |
+| `BOT_SWING_RISK_FRAC` | `0.005` | Riesgo por operación: 0.5% del equity |
+| `BOT_SWING_MAX_POSITIONS` | `10` | Posiciones simultáneas |
+| `BOT_SWING_MAX_DD` | `0.35` | Drawdown que frena las entradas |
+| `BOT_SWING_SYMBOLS` | vacío | Por defecto: las 79 crypto de XBTFX, o `BTCUSDm,ETHUSDm` en Exness |
+
+En Exness, el swing usa sus propios archivos: `swing_exness_state.json`, `swing_exness_trades.log` y `swing_exness_kill_switch.halt`.
+
+## Uso
+
+### Swing diario
 
 ```powershell
-py -m pip install -r requirements.txt
+py .\swing_daily.py --once --dry-run   # decide hoy, sin órdenes
+py .\swing_daily.py                    # queda corriendo; decide una vez por día después de las 00:10 UTC
 ```
 
-2) Copiá `.env.example` a `.env` y completá valores (el bot carga `.env` al arrancar; no pisa variables que ya hayas definido en PowerShell):
+Una vez por día, sobre la vela diaria cerrada:
 
-- `MT5_LOGIN`
-- `MT5_PASSWORD`
-- `MT5_SERVER`
+1. **Vende** si el cierre quedó debajo del mínimo de los 10 días anteriores o de la media de 200 días.
+2. **Compra** si el cierre supera el máximo de los 20 días anteriores y está sobre la media de 200 días.
+3. **Tamaño:** arriesga 0.5% del equity hasta el mínimo de 10 días. El stop de emergencia en el bróker va al doble de esa distancia.
+4. **Freno:** no entra si el swap pasa el 30% anual, y deja de abrir si el equity cae 35% desde su máximo.
 
-3) (Opcional) Ajustá el resto en `.env` (lista completa en `.env.example`, sección N). Lo esencial para el **motor vivo (swing)**:
+Backtest BTC+ETH 2018–2026 con costos de Exness: 32% anual, Sharpe 0.98, caída máxima −34%, win rate ~30%. Opera poco: un par de veces por año y por símbolo.
 
-- `BOT_SWING_DRY_RUN=0` y `BOT_SWING_DEMO_LIVE=1` para mandar órdenes (sin eso solo registra). Solo cuenta demo XBTFX.
-- `BOT_SWING_RISK_FRAC=0.005` (0.5% del equity por trade), `BOT_SWING_MAX_POSITIONS=10`, `BOT_SWING_MAX_DD=0.35`
-- `BOT_SWING_HONOR_ROTATION_HALT=0` (la rotación está apagada con su halt; el swing no lo respeta). Freno del swing: crear `swing_kill_switch.halt`.
+En Exness, con 200 USD de saldo no puede entrar: el lote mínimo de BTC arriesga unos 76 USD. Hace falta un saldo demo de ~20.000 USD.
 
-Variables de la rotación (apagada), por si se vuelve a usar:
+Runbook completo: [`trading/docs/SWING_ENGINE.md`](trading/docs/SWING_ENGINE.md).
 
-- `PAPER_DEMO_LIVE=1`, `BOT_DRY_RUN=0` (demo XBTFX; nunca cuenta real)
-- `BOT_ENSEMBLE_MIN_AGREE=4` (4 de 5 módulos), `BOT_MAX_RISK_USD=0.50`, `BOT_MAX_OPENS_PER_HOUR=60`
-- `BOT_ROTATION_MAX_SPREAD_USD_FRAC=0.10`, `BOT_ROTATION_STALE_SECONDS=300`, `BOT_ROTATION_STALE_CLOSE_ALL=1`
-- `BOT_ROTATION_BOOK_HARVEST_USD=0.50` (aplanar el libro; 0 = off)
+### Chequeo previo y diario de operaciones manuales
 
-## Archivos principales (qué hace cada uno)
+```powershell
+py .\chequeo_previo.py abrir --lado BUY --stop 80300 --tp 81500 --idea "M5 rompió el mínimo de la última hora"
+py .\chequeo_previo.py cerrar     # busca el resultado en MT5 y pregunta si seguiste el plan
+py .\chequeo_previo.py resumen    # neto, win rate, R medio, plan seguido
+```
+
+`abrir` calcula el tamaño para no pasar tu riesgo (10 USD por defecto, `--riesgo-usd`) y muestra el R:R y los escenarios. También lista las razones para **no** entrar:
+
+- el lote mínimo pasa tu riesgo
+- el precio está del lado equivocado de la media de 200 días
+- D1, H4 o H1 no acompañan
+- estás persiguiendo un movimiento
+- el stop está dentro del ruido normal
+- el R:R es bajo
+- el spread es caro
+- cerraste una pérdida hace menos de una hora
+
+Además te pregunta si entrás por plan, FOMO, venganza o aburrimiento. Lo anota en `DIARIO.md` (para leer) y en `diario_operaciones.jsonl` (para medir). **Nunca abre la operación**: eso lo hacés vos en MT5.
+
+### Grabador del libro de órdenes
+
+```powershell
+py .\record_binance_book.py     # BTCUSDT, 20 niveles, 1 por segundo → logs/binance/book/
+```
+
+Hace lectura pública de Binance, sin clave. Se corta si cerrás la ventana o la PC se suspende.
+
+### Stack local
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start_all.ps1   # swing + dashboard
+python .\flask_dashboard.py                                          # dashboard en http://127.0.0.1:8000
+```
+
+El dashboard lee `bot_state.json`, que escribía la rotación. El swing todavía no tiene vista propia.
+
+## Cómo se investiga una idea
+
+1. **Pre-registro:** antes de mirar los datos se escribe un `trading/docs/PREREG_*.md` con la regla, los costos y la vara (n mínimo, p con Bonferroni, PF > 1). El script guarda el SHA-256 de ese archivo en su salida, y `.gitattributes` mantiene esos archivos byte por byte.
+2. **Datos:** Binance spot de 1 minuto (`fetch_binance_1m.py`, `fetch_binance_1m_flow.py`) como precio, con el spread y el swap de Exness como costo.
+3. **Train y holdout:** el train va de octubre de 2024 a enero de 2026. El holdout (febrero a septiembre de 2026) **ya se usó** para la reversión corta. Las ideas nuevas se prueban solo con datos nuevos: forward en demo o el libro de órdenes grabado.
+4. **Antes de cualquier dinero real:** forward en demo, gate dual (Vibe-Trading + QuantConnect) y nota de risk-quant. Ver `AGENTS.md`.
+
+Los scripts de investigación son los `analyze_*.py` de la raíz. Cada uno deja su resultado en `*_out.json`.
+
+## Archivos principales
 
 | Archivo | Rol |
-|--------|-----|
-| `swing_daily.py` | **Motor vivo:** swing diario Donchian 20/10 + SMA200; logs JSON en `swing_trades.log`, estado en `swing_state.json`. |
-| `trading/domain/swing_donchian.py` | Reglas del swing (entrada, salida, tamaño, swap, halt por drawdown), sin I/O. |
-| `trading/application/swing_engine.py` | Ciclo diario: primero salidas, después entradas, gates y log. |
-| `trading/infrastructure/mt5_swing_broker.py` | Adaptador MT5 del swing (velas D1 cerradas, órdenes, swap en USD). |
-| `trading/backtest/qc/swing_donchian_qc.py` | El mismo swing para el backtest independiente en QuantConnect. |
-| `bot_mt5.py` | Rotación 5 módulos / 4/5, **apagada desde 2026-10-07** (ver `trading/docs/ROTATION_ENGINE.md`). |
-| `trading/domain/ensemble.py` | Módulos HTF / momentum / intermarket / vol_bands / structure, vetos, Kelly cap $0.50. |
-| `telegram_notify.py` | Avisos opcionales por Telegram (MT5 caído, errores de loop, arranque/parada, apertura/cierre de trades). |
-| `flask_dashboard.py` | Dashboard local (`bot_state.json`, posiciones, lab, journal). |
-| `indicators.py` | Indicadores compartidos (EMA, ADX Wilder, etc.). |
-| `trading/domain/expected_value.py` | EV, posterior Beta-Binomial y tope quarter-Kelly (sin I/O). |
-| `trading/domain/ev_validation.py` | Buckets `símbolo|sesión|ADX` y walk-forward. |
-| `logs/trades_*.log` | Rotación de logs viejos si activaste rotación al arranque del bot. |
+|---|---|
+| `swing_daily.py` | Motor del swing: detección de Exness o XBTFX, gates, loop diario |
+| `trading/domain/swing_donchian.py` | Reglas del swing (entrada, salida, tamaño, swap, halt), sin I/O |
+| `trading/application/swing_engine.py` | Ciclo diario: primero salidas, después entradas |
+| `trading/infrastructure/mt5_swing_broker.py` | Adaptador MT5 del swing |
+| `chequeo_previo.py`, `trading/domain/pretrade.py` | Chequeo previo y diario manual |
+| `trading/domain/murphy_trend.py`, `murphy_rule.py` | Lectura de tendencia de Murphy (capítulo 4) y su regla |
+| `record_binance_book.py` | Grabador del libro de Binance |
+| `analyze_*.py` | Investigación (solo lectura) |
+| `trading/backtest/qc/swing_donchian_qc.py` | El swing en QuantConnect |
+| `bot_mt5.py`, `trading/domain/ensemble.py` | Rotación (apagada) |
+| `telegram_notify.py`, `flask_dashboard.py` | Avisos por Telegram y dashboard local |
 
-## Cómo funciona el bot
+## Documentación
 
-Hay **un solo motor vivo**: el swing diario. La rotación está apagada. El dashboard (`flask_dashboard.py`) lee `bot_state.json`, que escribía la rotación; el swing todavía no tiene vista propia (su estado está en `swing_trades.log` y `swing_state.json`).
+| Documento | Contenido |
+|---|---|
+| [`trading/docs/SWING_ENGINE.md`](trading/docs/SWING_ENGINE.md) | Runbook del swing, evidencia, sección Exness y nota risk-quant |
+| [`trading/docs/INTRADIA_EXNESS.md`](trading/docs/INTRADIA_EXNESS.md) | Todo lo medido en intradía en Exness |
+| [`trading/docs/ESTABLISHED_FACTS.md`](trading/docs/ESTABLISHED_FACTS.md) | Hechos establecidos y lo ya descartado |
+| `trading/docs/PREREG_*.md` | Pre-registros (Murphy intradía, flujo agresor, reversión corta) |
+| [`trading/docs/MURPHY_ENGINE.md`](trading/docs/MURPHY_ENGINE.md) | Lector Murphy por fases |
+| [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md) | Rotación apagada, como registro histórico |
 
-```
-00:10 UTC → velas diarias cerradas (79 crypto) → salidas → entradas → order_send demo XBTFX
-                                                              ↓
-                                       swing_trades.log (SWING_PLAN / SWING_OPEN / SWING_CLOSE)
-```
+## Logs
 
-### 1) Motor vivo — swing diario (magic `260501`)
+| Archivo | Contenido |
+|---|---|
+| `swing_trades.log` / `swing_exness_trades.log` | JSON por línea: `SWING_GATE`, `SWING_PLAN`, `SWING_OPEN`, `SWING_CLOSE`, `SWING_DRY_*` |
+| `trades.log` | Rotación: `ENSEMBLE_VOTE`, `TRADE_OPEN`, `TRADE_CLOSE`, `ROTATION_BOOK` (histórico) |
+| `logs/binance/` | Datos de Binance para la investigación (no se versionan) |
 
-1. Una vez por día, 10 minutos después del cierre diario (00:10 UTC), mira las 79 crypto.
-2. **Vende** lo que tiene si cerró debajo del mínimo de los 10 días anteriores o debajo de su promedio de 200 días.
-3. **Compra** si cerró por encima del máximo de los 20 días anteriores y por encima del promedio de 200 días. Solo compras, nunca ventas en corto.
-4. Arriesga 0.5% del equity por trade (distancia hasta el mínimo de 10 días), máximo 10 posiciones. Si hay más señales que lugares, elige las que más subieron en 90 días.
-5. Stop de emergencia en el bróker a 2 veces esa distancia. No entra si el swap del símbolo supera 30% anual.
-6. Si el equity cae 35% desde su máximo, deja de abrir hasta que una persona borre `swing_kill_switch.halt`.
+## Historial
 
-Detalle, gates y catálogo de logs: [`trading/docs/SWING_ENGINE.md`](trading/docs/SWING_ENGINE.md).
-
-### 2) Apagado el 2026-10-07 — rotación crypto (magic `260414`)
-
-Descripción tal como quedó (no corre):
-
-Universo: **79 CFD** XBTFX (`!`). Demo only (`PAPER_DEMO_LIVE` + `trade_mode` demo). Nunca dinero real.
-
-1. Cada ~15s vota **5 módulos** independientes: `htf` (M15 vs EMA50), `momentum_short`, `intermarket`, `vol_bands`, `structure`.
-2. Dispara si **4/5** coinciden en BUY o SELL. `NONE` cuenta en contra. Volumen XBTFX no vota.
-3. Vetos (no son votos extra): HTF contra el lado (`veto_htf`); último M1 sin pullback a EMA9/20 (`sin_pullback`); RSI≥70/≤30 solo si HTF es rango (`rsi_rango`).
-4. Size: Kelly **solo achica** hasta `BOT_MAX_RISK_USD=0.50`. SL/TP $0.50 si entra en el 5% del precio; si no, ±5% y el lote escala.
-5. Skip spread si el bid/ask cubre el stop o el agujero USD es **> 10%** del riesgo.
-6. Tope **60** `DEAL_ENTRY_IN` / hora y **un** slot por símbolo.
-7. Tras **5 min**: `profit > 0.01` → `stale_take`, `profit < -0.0001` → `stale_loss`, banda del medio → `stale_time`.
-8. Harvest del libro: neto flotante ≥ **0.50**, ≥2 tickets, el más joven ≥ 10 min → cierra todas (`rot_book_harvest`).
-9. Comentario de apertura `rot_4_5`. `why_open=consenso_4_5`.
-
-Catálogo de logs y skip reasons: [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md). Dashboard: Home “5 módulos · 4/5 + veto M15”; Lab 5 badges.
-
-### 3) Retirado el 2026-10-06
-
-El loop H4/M15 (`strategy_core.py`), el EV gate / quarter-Kelly del loop principal, el detector de régimen (`market_regime.py`) y el XAUUSD paralelo (magic `260415`) se quitaron del código. Su historial sigue en el bróker y en `trades.log`; el motor vivo no los usa.
-
-## Ejecutar
-
-Stack local (swing + dashboard Flask; sin Docker, MetaTrader 5 abierto):
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start_all.ps1
-```
-
-Solo el motor vivo (swing), con `.env` en la carpeta del proyecto:
-
-```powershell
-cd C:\Users\juani\Projects\meta-trader
-py .\swing_daily.py                    # queda corriendo; decide una vez por día
-py .\swing_daily.py --once --dry-run   # prueba: decide hoy sin mandar órdenes
-```
-
-La rotación (`py .\bot_mt5.py`) está apagada: si se arranca, el `kill_switch.halt` le impide abrir.
-
-Alternativa: definir credenciales solo en PowerShell (sin `.env`):
-
-```powershell
-$env:MT5_LOGIN="123456"
-$env:MT5_PASSWORD="your_password"
-$env:MT5_SERVER="MetaQuotes-Demo"
-py .\bot_mt5.py
-```
-
-## Dashboard (local)
-
-El bot escribe `bot_state.json`. Podés ver ese estado en el navegador:
-
-```powershell
-pip install -r requirements.txt
-python .\flask_dashboard.py
-```
-
-Luego abrí `http://127.0.0.1:8000`.
-
-## Logs estructurados
-
-El swing escribe `swing_trades.log` (`SWING_GATE`, `SWING_PLAN`, `SWING_OPEN`, `SWING_CLOSE`, …; catálogo en [`trading/docs/SWING_ENGINE.md`](trading/docs/SWING_ENGINE.md)). La rotación escribía `trades.log` con eventos JSON (`ENSEMBLE_VOTE`, `TRADE_OPEN`, `TRADE_CLOSE`, `ROTATION_BOOK`, …). Catálogo completo en [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md).
-
-## Gestión de posiciones
-
-Swing: salida por cierre diario (mínimo de 10 días o SMA200) y stop de emergencia en el bróker; ver [`trading/docs/SWING_ENGINE.md`](trading/docs/SWING_ENGINE.md). Rotación (apagada): SL/TP de $0.50 (o ±5%), cierre a los 5 minutos, harvest del libro y kill switch: ver [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md). La escalera USD, el ATR trail, el profit lock, el filter-exit, el break-even y el trailing se quitaron del código el 2026-10-06.
-
-Si MT5 rechaza un cambio de SL (por `stops_level` / `freeze_level` o porque el SL quedaría del lado inválido del precio actual), el bot lo registra y lo reintenta en próximos ciclos cuando sea válido.
-
-## Notas operativas
-
-- Swing: velas **D1** cerradas (el servidor XBTFX está en UTC); magic **260501**.
-- Rotación (apagada): timeframes de voto **M1 / M5 / M15** (más M15/H4 para el snapshot Murphy).
-- Ventana horaria: `BOT_TRADING_WINDOW_ENABLED` y el cutoff de viernes no aplican a la rotación (el código los fuerza a off).
-- Máximo de posiciones: `BOT_MAX_OPEN_TRADES` (60) y una por símbolo; órdenes del bot identificables por `magic` (260414).
-
+- **2026-10-27/28:** se adapta el swing a Exness (dry-run). Investigación intradía en Exness, sin ventaja neta. Se suman el chequeo previo y el grabador del libro.
+- **2026-10-10:** la terminal pasa a Exness. Arranca el lector Murphy en solo lectura.
+- **2026-10-07:** se apaga la rotación, porque antes del spread daba cero. El swing pasa a ser el motor en la demo XBTFX.
+- **2026-10-06:** se retiran el loop H4/M15 (`strategy_core.py`), el EV gate, el detector de régimen y el XAUUSD paralelo.
