@@ -1,5 +1,9 @@
 # MetaTrader 5 Python Bot
 
+[![Invitame un café en cafecito.app](https://cdn.cafecito.app/imgs/buttons/button_5.svg)](https://cafecito.app/juanig88)
+
+Si este repo te sirve, podés invitarme un café en [cafecito.app/juanig88](https://cafecito.app/juanig88). Me ayuda mucho a seguir investigando y publicando lo que aprendo.
+
 Bot e investigación de trading en crypto para **MetaTrader 5**, con la librería oficial `MetaTrader5` de Python. Corre en tu PC con MT5 abierto y logueado. **Solo cuentas demo.**
 
 Contexto para agentes: [`AGENTS.md`](AGENTS.md). Lo que ya se midió y no hay que volver a proponer: [`trading/docs/ESTABLISHED_FACTS.md`](trading/docs/ESTABLISHED_FACTS.md).
