@@ -99,3 +99,11 @@ swing_exness_kill_switch.halt
 docs/*.pdf
 docs/WhatsApp Image *.jpeg
 historial_canal*.txt
+
+# Productos para vender (no publicar en el repo publico)
+productos/
+
+# Datos personales y configuracion local (el repo es publico)
+DIARIO.md
+diario_operaciones.jsonl
+.claude/settings.local.json
