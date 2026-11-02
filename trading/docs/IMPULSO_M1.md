@@ -7,7 +7,7 @@ Regla sacada de las operaciones manuales del usuario del 29 y 30/10 en BTCUSDm (
 - Código: `trading/domain/impulso_m1.py` (regla pura) e `impulso_m1.py` (runner).
 - Tests: `tests/test_impulso_m1.py`.
 - Log: `impulso_trades.log`, un JSON por línea.
-- Lecciones y diario de operaciones reales y del bot: [BASE_CONOCIMIENTO.md](BASE_CONOCIMIENTO.md). Se actualiza solo cuando se abre una orden y se ve su resultado.
+- Lecciones y diario de operaciones reales y del bot: [BASE_CONOCIMIENTO.md](BASE_CONOCIMIENTO.md). Se actualiza solo cuando se abre una orden y se ve su resultado. Es solo local (está en `.gitignore` porque tiene datos de la cuenta real).
 
 ## Entrada
 
