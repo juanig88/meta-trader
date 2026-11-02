@@ -1,14 +1,17 @@
 """Public Binance spot klines. No API key, no orders.
 
-Each row is open time (ms), open, high, low, close, base volume, trade count.
+Each row is open time (ms), open, high, low, close, base volume, trade count, quote volume
+(USDT traded) and taker-buy quote volume. ``update_csv`` keeps a local history file current.
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 KLINES_URL = "https://api.binance.com/api/v3/klines"
@@ -50,6 +53,8 @@ def fetch_klines(
                 "close": float(row[4]),
                 "volume": float(row[5]),
                 "trades": int(row[8]),
+                "quote_volume": float(row[7]),
+                "taker_buy_quote": float(row[10]),
             })
         next_open = int(batch[-1][0]) + 1
         if next_open <= cursor:
@@ -75,3 +80,37 @@ def _get(url: str, timeout_s: float) -> list[Any]:
     if not isinstance(payload, list):
         raise RuntimeError("binance klines: respuesta inesperada")
     return payload
+
+
+FIELDS = ("open_ms", "open", "high", "low", "close", "volume", "trades", "quote_volume", "taker_buy_quote")
+INTERVAL_MS = {"15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}
+
+
+def read_csv(path: Path) -> list[dict[str, Any]]:
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            return [{k: (int(float(v)) if k in ("open_ms", "trades") else float(v)) for k, v in r.items()}
+                    for r in csv.DictReader(fh)]
+    except FileNotFoundError:
+        return []
+
+
+def update_csv(path: Path, symbol: str, interval: str, since_ms: int, now_ms: int | None = None) -> list[dict[str, Any]]:
+    """Append the closed candles missing from ``path`` (from ``since_ms`` on first run); returns all rows."""
+    rows = read_csv(path)
+    step = INTERVAL_MS[interval]
+    now = int(now_ms if now_ms is not None else time.time() * 1000)
+    start = rows[-1]["open_ms"] + step if rows else int(since_ms)
+    end = now - now % step  # only candles already closed
+    new = fetch_klines(symbol, interval, start, end) if end > start else []
+    if new:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fresh = not path.exists() or not rows
+        with open(path, "a", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=FIELDS)
+            if fresh:
+                w.writeheader()
+            for r in new:
+                w.writerow({k: r[k] for k in FIELDS})
+        rows += new
+    return rows

@@ -4,6 +4,10 @@ This repository hosts a **trading bot** (under `trading/`) alongside the existin
 
 **Live engine (since 2026-10-07):** daily **swing** Donchian 20/10 + SMA200 on the XBTFX **demo** (`swing_daily.py`, magic 260501). Runbook: [`trading/docs/SWING_ENGINE.md`](trading/docs/SWING_ENGINE.md). The rotation below is **stopped** (`kill_switch.halt` reason `rotacion_reemplazada_por_swing`) because it did not make money; it stays documented as history.
 
+**Experiment (since 2026-10-30):** **Impulso M1** on the Exness **demo** (`impulso_m1.py`, magics 261030 fixed TP / 261031 fade exit), a rule taken from the user's manual BTC trades. Since 2026-10-31 the only entry on is the **false-break return** (magic 261033: H1 close beyond a zone = evaluate, confirm at 2%/24h, trade the return with the held trend; 0.01 lot, risk max(4 USD, 50% of profit); the break candle's real Binance volume is downloaded hourly and logged/reported, not used as a filter). It only attaches to a second, demo-only MT5 (`BOT_IMPULSO_MT5_PATH`). Runbook: [`trading/docs/IMPULSO_M1.md`](trading/docs/IMPULSO_M1.md).
+
+**Knowledge base:** [`trading/docs/BASE_CONOCIMIENTO.md`](trading/docs/BASE_CONOCIMIENTO.md) holds the pre-trade checklist, the lessons, and the journal of the user's real trades and the bot's demo trades. Read it before analyzing any trade scenario. Update it **only** after an order is opened and its outcome is seen, not after every conversation.
+
 **Former live engine:** crypto **rotation** on XBTFX **demo**, not the old H4/XAU loop. Full evidence, why we open/close, and the `trades.log` event catalog: [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md). Cursor also loads `.cursor/rules/rotation-engine.mdc` on every chat. **Update that markdown when the live rules change.**
 
 ## What the rotation did (stopped 2026-10-07)

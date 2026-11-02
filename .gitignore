@@ -107,3 +107,21 @@ productos/
 DIARIO.md
 diario_operaciones.jsonl
 .claude/settings.local.json
+
+# Impulso M1 (demo Exness)
+impulso_trades.log
+impulso_kill_switch.halt
+news_seen.json
+news_seen.json.tmp
+news_alerts.log
+impulso_zonas.txt
+impulso_zonas_estado.json
+impulso_zonas_estado.json.tmp
+impulso_regimen.json
+impulso_regimen.json.tmp
+
+# Binance public candles (volume history for the impulso bot)
+data/binance/
+
+# Real-account broker reports (personal data, public repo)
+docs/exness-results/
