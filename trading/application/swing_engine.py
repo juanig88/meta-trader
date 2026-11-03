@@ -11,9 +11,11 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional, Protocol, Sequence
 
+from trading.domain.ath import drawdown_from_ath
 from trading.domain.swing_donchian import Contract, Levels, SwingParams, drawdown_halt, levels, plan_day
 
 LogFn = Callable[[dict], None]
+ATH_BARS = 5000  # daily bars asked for the ATH; the broker returns what history it has
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,13 @@ def run_swing_day(
                 "skips": [[s.symbol, s.reason] for s in plan.skips], "stale_bars": stale,
                 "universe": len(lv_by)})
 
+    def ath(sym: str, price: Optional[float]) -> dict:
+        # Telemetry only (dd_from_ath): no rule reads it. ath_bars says how deep the history went.
+        hist = broker.daily_bars(sym, ATH_BARS)
+        if hist is None or not hist.highs or not price:
+            return {"dd_from_ath": None, "ath_bars": 0}
+        return {"dd_from_ath": drawdown_from_ath(hist.highs, price), "ath_bars": len(hist.highs)}
+
     closed = 0
     for sym, why in plan.exits:
         lv = lv_by[sym]
@@ -117,7 +126,7 @@ def run_swing_day(
             ev = base | {"symbol": sym, "ticket": p.ticket, "why_closed": why, "volume": p.volume,
                          "price_open": p.price_open, "profit": p.profit,
                          "close_ref": lv.close if lv else None, "exit_low": lv.exit_low if lv else None,
-                         "sma200": lv.sma if lv else None}
+                         "sma200": lv.sma if lv else None} | ath(sym, lv.close if lv else None)
             if not send_orders:
                 log(ev | {"event": "SWING_DRY_CLOSE"})
                 continue
@@ -130,7 +139,7 @@ def run_swing_day(
     for e in plan.entries:
         ev = base | {"symbol": e.symbol, "side": "BUY", "lots": e.lots, "entry_ref": e.entry_ref,
                      "exit_low": e.exit_low, "disaster_sl": e.disaster_sl, "risk_usd": round(e.risk_usd, 2),
-                     "momentum_90d": round(e.momentum, 4), "why_open": "donchian_20_sma200"}
+                     "momentum_90d": round(e.momentum, 4), "why_open": "donchian_20_sma200"} | ath(e.symbol, e.entry_ref)
         if block_reason:
             log(ev | {"event": "SWING_SKIP", "reason": block_reason})
             continue

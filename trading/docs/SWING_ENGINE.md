@@ -102,8 +102,8 @@ El Telegram de las 00:10 (hora Argentina) sigue siendo la tarea `MetaTrader Dail
 |---|---|
 | `SWING_GATE` | Cada corrida: cuenta, gate demo, `block_reason`, riesgo |
 | `SWING_PLAN` | Equity, abiertas, salidas, entradas, skips (`swap_caro`, `tope_posiciones`, `bajo_volume_min`, `stop_invalido`), `stale_bars` |
-| `SWING_OPEN` / `SWING_OPEN_FAIL` | Orden de compra: lotes, `entry_ref`, `exit_low`, `disaster_sl`, `risk_usd`, `momentum_90d`, retcode |
-| `SWING_CLOSE` / `SWING_CLOSE_FAIL` | `why_closed` = `bajo_minimo_10d` / `bajo_sma200` |
+| `SWING_OPEN` / `SWING_OPEN_FAIL` | Orden de compra: lotes, `entry_ref`, `exit_low`, `disaster_sl`, `risk_usd`, `momentum_90d`, `dd_from_ath`, `ath_bars`, retcode |
+| `SWING_CLOSE` / `SWING_CLOSE_FAIL` | `why_closed` = `bajo_minimo_10d` / `bajo_sma200`, `dd_from_ath`, `ath_bars` |
 | `SWING_DRY_OPEN` / `SWING_DRY_CLOSE` | Lo mismo sin orden (dry-run) |
 | `SWING_SKIP` | Entrada válida bloqueada por gate (`block_reason`) |
 | `SWING_ABORT` | Sin cuenta MT5 |
@@ -144,3 +144,7 @@ Condiciones:
   - `risk`+`alts` (2026-10-07, Coinbase, 2018-03-05 → 2026-07-10, fin de datos QC): **pasa**. CAGR 8.6%, DD −29.5%, total +98.5%. Tramo A +6.6%/año (DD −28.7%), tramo B +12.5%/año (DD −15.5%). El DD coincide con V3 (−28.6%); el CAGR es la mitad (19% en V3 con 79 CFD XBTFX contra 40 pares Coinbase).
   - `sleeve`+`majors` (2026-10-07, corrida `f757f62d…`): **pasa**. CAGR 27.0% (nuestro 27.5%), DD −38.8% (−36.5%), tramo A +34.6%/año (+36%), tramo B +13.6%/año (+13%). Las dos corridas previas fueron inválidas por bugs de rebalanceo del algoritmo en la cuenta cash, no de la estrategia.
 - Cuenta demo XBTFX separada.
+
+## Distancia al ATH (solo registro, desde 2026-11-03)
+
+Cada apertura y cierre registra `dd_from_ath`: cuánto está el precio por debajo del máximo histórico (0.36 = 36% bajo el ATH). El ATH es el máximo de las velas diarias que tiene el broker (se piden hasta 5000). `ath_bars` dice cuántas había: si la historia del broker es corta, ese "ATH" es solo el máximo de esa ventana. **Ninguna regla lo usa.** Sale de una idea de un hilo (empezar DCA al 50% del ATH, vender en el ATH) que no se puede validar con 3–4 ciclos. Se registra para ver más adelante si los resultados cambian según la zona.

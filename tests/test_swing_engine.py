@@ -126,3 +126,12 @@ def test_no_account_aborts():
     b.account = lambda: None
     out, ev = run(b)
     assert out["ran"] is False and ev[0]["event"] == "SWING_ABORT"
+
+
+def test_entries_and_exits_log_distance_from_ath():
+    pos = PositionView(ticket=11, symbol="ETHUSD!", volume=0.5, price_open=120.0, profit=-3.0)
+    b = FakeBroker({"ETHUSD!": bars(90.0), "SOLUSD!": bars(120.0)}, open_pos=[pos])
+    _, ev = run(b)
+    close, opened = ev[1], ev[2]
+    assert close["dd_from_ath"] == round(1 - 90.0 / 101.0, 4) and close["ath_bars"] == 230
+    assert opened["dd_from_ath"] == round(1 - 120.0 / 121.2, 4)  # close just under the bar high

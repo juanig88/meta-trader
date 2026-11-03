@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from trading.domain.ath import drawdown_from_ath
 from trading.domain.demo_gate import account_is_mt5_demo
 from trading.domain.impulso_m1 import (
     BUY, Bar, ImpulseParams, RejectionParams, detect_impulse, detect_rejection, fade_exit,
@@ -129,6 +130,7 @@ class Engine:
         self.vol_path = Path(_env("BOT_IMPULSO_VOLUME_FILE", "data/binance/BTCUSDT_1h.csv"))
         self.vol_symbol = _env("BOT_IMPULSO_VOLUME_SYMBOL", "BTCUSDT")
         self.vol_rows: list[dict] = []
+        self.ath_highs: list[float] = []  # Binance H1 highs since 2017-08, for dd_from_ath
         self.tp_rej_usd = _env_float("BOT_IMPULSO_TP_REJECTION_USD", 2.0)
         self.last_rej_at = 0.0
         self.spike_mult = _env_float("BOT_IMPULSO_SPIKE_MULT", 3.0)
@@ -326,7 +328,9 @@ class Engine:
     def _refresh_volume(self) -> None:
         """Append the Binance H1 candles closed since the last run to the local history file."""
         try:
-            self.vol_rows = update_csv(self.vol_path, self.vol_symbol, "1h", 1502942400000)[-200:]
+            rows = update_csv(self.vol_path, self.vol_symbol, "1h", 1502942400000)
+            self.ath_highs = [max(r["high"] for r in rows)] if rows else []
+            self.vol_rows = rows[-200:]
         except Exception as exc:  # network down: keep what we had, the rule does not need it
             self.log({"event": "VOLUME_ERROR", "error": str(exc)[:200]})
 
@@ -412,6 +416,7 @@ class Engine:
         profit = float(a.balance) - self.start_balance if a is not None else 0.0
         cap = risk_cap(profit, self.risk_floor_usd, self.risk_share)
         risk = abs(entry - sl) / per_usd
+        dd_ath = drawdown_from_ath(self.ath_highs, entry)  # telemetry only, Binance ATH vs Exness price
         block = ""
         if side not in allowed_sides(self.trend):
             block = "contra_tendencia"
@@ -430,13 +435,13 @@ class Engine:
         self.log({"event": "FALSA_SIGNAL", "side": side, "entry": entry, "sl": round(sl, 2),
                   "tp": round(tp, 2) if tp else None, "extreme": extreme, "risk_usd": round(risk, 2),
                   "cap_usd": round(cap, 2), "profit_usd": round(profit, 2), "trend": self.trend,
-                  "vol_rel": vol_rel, "send_orders": self.send, "block_reason": block})
+                  "vol_rel": vol_rel, "dd_from_ath": dd_ath, "send_orders": self.send, "block_reason": block})
         if block or not self.send:
             return
         res = self._open(side, sl, tp, self.magic_fb, "imp_falsa")
         self.log({"event": "IMPULSO_OPEN", "magic": self.magic_fb, "variant": "imp_falsa", "entry": entry,
                   "sl": round(sl, 2), "tp": round(tp, 2), "risk_usd": round(risk, 2), "cap_usd": round(cap, 2),
-                  "trend": self.trend, "vol_rel": vol_rel, "lots": self.lots, **res})
+                  "trend": self.trend, "vol_rel": vol_rel, "dd_from_ath": dd_ath, "lots": self.lots, **res})
         if res.get("ok") and res.get("position"):
             self.open_tickets[int(res["position"])] = self.magic_fb
 

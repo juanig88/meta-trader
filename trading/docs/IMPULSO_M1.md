@@ -163,6 +163,8 @@ Log: `FALSA_SIGNAL` con `block_reason` (`contra_tendencia`, `sin_zona_objetivo`,
 
 El volumen de Exness es solo cantidad de cambios de precio (CFD), así que el bot usa los **USDT operados en Binance spot BTCUSDT**, la misma vela H1 en horario UTC. Cada hora agrega a `data/binance/BTCUSDT_1h.csv` (ignorado por git, historia desde 2017-08) las velas que faltan. Si la red falla, registra `VOLUME_ERROR` y sigue sin el dato. La variable es el **volumen relativo de la vela de la ruptura**: lo que se operó en ella dividido por la mediana de las 24 H1 anteriores. Se guarda en la evaluación (`watch.vol_rel`), va en `FALSA_SIGNAL` / `IMPULSO_OPEN` y en el Telegram de la evaluación.
 
+**Distancia al ATH (solo registro, desde 2026-11-03).** `FALSA_SIGNAL` / `IMPULSO_OPEN` también llevan `dd_from_ath`: cuánto está la entrada (precio Exness) por debajo del máximo histórico de las H1 de Binance de ese mismo archivo (0.39 = 39% bajo el ATH; 126,199.63 el 2025-10-06). Se recalcula con cada actualización horaria. Ninguna regla lo usa: sirve para ver más adelante si los resultados cambian según la zona.
+
 Medido con esta misma regla sobre Binance 2017-08 → 2026-10 (3443 sospechas). El análisis quedó escrito y sellado con SHA-256 antes de ver los datos; el desarrollo es antes del 2024-11-10 y el examen después.
 
 | Volumen de la ruptura | Rupturas falsas (desarrollo) | Rupturas falsas (examen) |
