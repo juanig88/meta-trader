@@ -122,6 +122,7 @@ impulso_regimen.json.tmp
 
 # Binance public candles (volume history for the impulso bot)
 data/binance/
+data/exness/
 
 # Real-account broker reports (personal data, public repo)
 docs/exness-results/
