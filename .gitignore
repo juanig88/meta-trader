@@ -127,3 +127,9 @@ data/exness/
 # Real-account broker reports (personal data, public repo)
 docs/exness-results/
 trading/docs/BASE_CONOCIMIENTO.md
+
+# TP chico C1 demo runner state and log
+tp_chico_estado.json
+tp_chico_estado.tmp
+tp_chico_trades.log
+tp_chico_kill_switch.halt
