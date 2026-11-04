@@ -45,7 +45,7 @@ python tp_chico.py             # opera en la demo (necesita BOT_TPCHICO_DEMO_LIV
 | `TPCHICO_OPEN` / `TPCHICO_OPEN_FAIL` | Orden: lado, SL, TP, spread, EMA, racha, retcode |
 | `TPCHICO_DRY_OPEN` | Lo mismo sin orden (dry-run) |
 | `TPCHICO_SKIP` | `ciclo_9_ganadoras`, `spread_caro`, `sin_ema`, `sin_tick` o `tpchico_halt` |
-| `TPCHICO_CLOSED` | Cierre visto en el broker: neto, precio, comentario (`[tp ...]` / `[sl ...]`) y estado |
+| `TPCHICO_CLOSED` | Cierre visto en el broker: `trade_net_usd` (neto de esa operación), precio, comentario (`[tp ...]` / `[sl ...]`) y estado (`net_usd` es el acumulado) |
 | `TPCHICO_END` | Llegó a 100 operaciones o a −30 USD |
 
 # TP chico lateral: segunda prueba en la demo (desde 2026-11-04)
@@ -81,4 +81,4 @@ Pausar: `tp_lateral_kill_switch.halt`. Estado: `tp_lateral_estado.json`. Log: `t
 | `TPLAT_START` | Arranque |
 | `TPLAT_SKIP` | Cada M15 sin entrada: `lunes`, `00_05_utc`, `lejos_de_zona`, `vela_grande`, `disparo_4h`, `tope_diario`, `spread_caro`, `sin_ema`, `tplateral_halt`, `terminado` |
 | `TPLAT_OPEN` / `TPLAT_OPEN_FAIL` / `TPLAT_DRY_OPEN` | Entrada: lado, SL, TP, distancia a la zona, spread |
-| `TPLAT_CLOSED` / `TPLAT_END` | Cierre con el neto del broker / fin de la prueba |
+| `TPLAT_CLOSED` / `TPLAT_END` | Cierre: `trade_net_usd` es el neto del broker de esa operación y `net_usd` el acumulado / fin de la prueba |

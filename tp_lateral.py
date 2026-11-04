@@ -96,8 +96,8 @@ class Engine(ChicoEngine):
                         for d in deals), 2)
         day = datetime.fromtimestamp(int(outs[-1].time), tz=timezone.utc).strftime("%Y-%m-%d")
         record_close(self.state, net, day)
-        self.log({"event": "TPLAT_CLOSED", "ticket": self.ticket, "net_usd": net, "close_price": float(outs[-1].price),
-                  "broker_comment": str(outs[-1].comment), **self.state.as_dict()})
+        self.log({"event": "TPLAT_CLOSED", "ticket": self.ticket, "close_price": float(outs[-1].price),
+                  "broker_comment": str(outs[-1].comment), **self.state.as_dict(), "trade_net_usd": net})
         if self.state.finished:
             self.log({"event": "TPLAT_END", **self.state.as_dict()})
         self.ticket = 0

@@ -91,8 +91,8 @@ class Engine:
         net = round(sum(float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0))
                         for d in deals), 2)
         record_close(self.state, net)
-        self.log({"event": "TPCHICO_CLOSED", "ticket": self.ticket, "net_usd": net, "close_price": float(outs[-1].price),
-                  "broker_comment": str(outs[-1].comment), **self.state.as_dict()})
+        self.log({"event": "TPCHICO_CLOSED", "ticket": self.ticket, "close_price": float(outs[-1].price),
+                  "broker_comment": str(outs[-1].comment), **self.state.as_dict(), "trade_net_usd": net})
         if self.state.finished:
             self.log({"event": "TPCHICO_END", **self.state.as_dict()})
         self.ticket = 0
