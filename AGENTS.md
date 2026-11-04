@@ -8,6 +8,8 @@ This repository hosts a **trading bot** (under `trading/`) alongside the existin
 
 **Experiment (since 2026-11-04):** **TP chico C1** on the same Exness **demo** terminal (`tp_chico.py`, magic 261104): 0.01 lot, +1 / −10 USD, side of yesterday's daily EMA 20, one position at a time, skip one entry after 9 wins, ends at 100 trades or −30 USD. It **failed** its pre-registered train (`PREREG_TP_CHICO.md`); it runs only as a forward check of the user's idea. Runbook: [`trading/docs/TP_CHICO.md`](trading/docs/TP_CHICO.md).
 
+**Experiment (since 2026-11-04):** **TP chico lateral** beside it (`tp_lateral.py`, magic 261105): same +1 / −10, one position, only near a zone in a calm market, never on Mondays or 00–05 UTC, −20 USD daily cap, ends at 100 trades or −50 USD. Found by exploring the train (`analyze_dias_malos.py`); only this forward run can confirm it (`PREREG_TP_LATERAL_DEMO.md`).
+
 **Knowledge base:** [`trading/docs/BASE_CONOCIMIENTO.md`](trading/docs/BASE_CONOCIMIENTO.md) holds the pre-trade checklist, the lessons, and the journal of the user's real trades and the bot's demo trades. It is **local only** (gitignored, personal account data); it is not in the public repo. Read it before analyzing any trade scenario. Update it **only** after an order is opened and its outcome is seen, not after every conversation.
 
 **Former live engine:** crypto **rotation** on XBTFX **demo**, not the old H4/XAU loop. Full evidence, why we open/close, and the `trades.log` event catalog: [`trading/docs/ROTATION_ENGINE.md`](trading/docs/ROTATION_ENGINE.md). Cursor also loads `.cursor/rules/rotation-engine.mdc` on every chat. **Update that markdown when the live rules change.**

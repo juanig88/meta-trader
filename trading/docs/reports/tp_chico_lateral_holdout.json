@@ -1,0 +1,43 @@
+{
+ "prereg_sha256": "7db8e17d6c9d429e83445f13dbc39c53ab9166e02132017356ee96845faf45dc",
+ "L1_lado_tendencia": {
+  "n": 3946,
+  "ganadoras_pct": 89.84,
+  "media": -0.125,
+  "ic95": [
+   -0.257,
+   -0.001
+  ],
+  "p_una_cola": 0.975,
+  "profit_factor": 0.877,
+  "compras": 1865,
+  "ventas": 2081,
+  "minutos_ganadoras_mediana": 30,
+  "operaciones_por_dia": 10.78,
+  "peor_dia": -55.36,
+  "mejor_dia": 33.88,
+  "con_2_abiertas": 1798,
+  "total": -494.58,
+  "aprueba": false
+ },
+ "L2_lado_zona": {
+  "n": 4166,
+  "ganadoras_pct": 89.77,
+  "media": -0.133,
+  "ic95": [
+   -0.245,
+   -0.022
+  ],
+  "p_una_cola": 0.992,
+  "profit_factor": 0.87,
+  "compras": 2297,
+  "ventas": 1869,
+  "minutos_ganadoras_mediana": 30,
+  "operaciones_por_dia": 11.38,
+  "peor_dia": -43.07,
+  "mejor_dia": 47.93,
+  "con_2_abiertas": 2133,
+  "total": -553.45,
+  "aprueba": false
+ }
+}

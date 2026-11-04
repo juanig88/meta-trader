@@ -133,3 +133,7 @@ tp_chico_estado.json
 tp_chico_estado.tmp
 tp_chico_trades.log
 tp_chico_kill_switch.halt
+tp_lateral_estado.json
+tp_lateral_estado.tmp
+tp_lateral_trades.log
+tp_lateral_kill_switch.halt

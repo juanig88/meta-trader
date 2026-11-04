@@ -51,6 +51,7 @@ class Engine:
         self.max_spread = _env_float("BOT_TPCHICO_MAX_SPREAD", 30.0)  # price units; Oct 2026 ran 6.4-10
         self.state_path = Path(_env("BOT_TPCHICO_STATE", "tp_chico_estado.json"))
         self.halt_path = Path(_env("BOT_TPCHICO_HALT", "tp_chico_kill_switch.halt"))
+        self.comment = "tp_chico_c1"
         self.state, self.ticket, self.last_hour = self._load()
         mt5.symbol_select(self.symbol, True)
 
@@ -145,7 +146,7 @@ class Engine:
         req = {"action": m.TRADE_ACTION_DEAL, "symbol": self.symbol, "volume": LOTS,
                "type": m.ORDER_TYPE_BUY if side == BUY else m.ORDER_TYPE_SELL,
                "price": float(tick.ask if side == BUY else tick.bid), "sl": round(float(sl), 2), "tp": round(float(tp), 2),
-               "deviation": 50, "magic": self.magic, "comment": "tp_chico_c1", "type_time": m.ORDER_TIME_GTC}
+               "deviation": 50, "magic": self.magic, "comment": self.comment, "type_time": m.ORDER_TIME_GTC}
         result = None
         for fill in (m.ORDER_FILLING_IOC, m.ORDER_FILLING_FOK, getattr(m, "ORDER_FILLING_RETURN", m.ORDER_FILLING_IOC)):
             req["type_filling"] = fill

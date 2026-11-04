@@ -47,3 +47,38 @@ python tp_chico.py             # opera en la demo (necesita BOT_TPCHICO_DEMO_LIV
 | `TPCHICO_SKIP` | `ciclo_9_ganadoras`, `spread_caro`, `sin_ema`, `sin_tick` o `tpchico_halt` |
 | `TPCHICO_CLOSED` | Cierre visto en el broker: neto, precio, comentario (`[tp ...]` / `[sl ...]`) y estado |
 | `TPCHICO_END` | Llegó a 100 operaciones o a −30 USD |
+
+# TP chico lateral: segunda prueba en la demo (desde 2026-11-04)
+
+Bot aparte, en el mismo terminal demo y al lado de C1: `tp_lateral.py`, magic **261105**. Reglas fijas en [PREREG_TP_LATERAL_DEMO.md](PREREG_TP_LATERAL_DEMO.md).
+
+- Código: `trading/domain/tp_lateral.py` (regla pura) y `tp_lateral.py` (runner; reusa el envío de órdenes de `tp_chico.py`). Tests: `tests/test_tp_lateral.py`.
+- Origen: `analyze_tp_chico_lateral.py` (la regla lateral con 2 posiciones no aprobó el holdout: −0,13 USD por operación) y `analyze_dias_malos.py` (con 1 posición, lunes y 00–05 UTC fueron peores en 2018-2021 y en 2022-2025; sin ellos quedó en +0,036 y +0,007). Es exploración: solo la demo lo confirma.
+
+## Regla
+
+| | |
+|---|---|
+| Cuándo | Al cierre de cada vela M15 de Exness, sin posición abierta de este magic (1 a la vez) |
+| Horario | Nunca los lunes ni de 00:00 a 05:59 UTC |
+| Mercado | Precio a ≤ 1% de una zona; ninguna de las últimas 4 M15 con rango > 2,5× la mediana de las 96 anteriores; sin movimiento > 1% en 4 horas |
+| Lado | EMA 20 diaria (debajo → venta, arriba → compra) |
+| TP / SL | +1 / −10 USD con 0.01 (100 / 1.000 de precio) |
+| Tope diario | −20 USD en el día UTC: no abre más hasta el día siguiente |
+| Fin | 100 operaciones o −50 USD |
+
+## Operación
+
+```bash
+python tp_lateral.py --dry-run
+python tp_lateral.py             # necesita BOT_TPLATERAL_DEMO_LIVE=1 en .env
+```
+
+Pausar: `tp_lateral_kill_switch.halt`. Estado: `tp_lateral_estado.json`. Log: `tp_lateral_trades.log` (fuera de git).
+
+| Evento | Qué es |
+|---|---|
+| `TPLAT_START` | Arranque |
+| `TPLAT_SKIP` | Cada M15 sin entrada: `lunes`, `00_05_utc`, `lejos_de_zona`, `vela_grande`, `disparo_4h`, `tope_diario`, `spread_caro`, `sin_ema`, `tplateral_halt`, `terminado` |
+| `TPLAT_OPEN` / `TPLAT_OPEN_FAIL` / `TPLAT_DRY_OPEN` | Entrada: lado, SL, TP, distancia a la zona, spread |
+| `TPLAT_CLOSED` / `TPLAT_END` | Cierre con el neto del broker / fin de la prueba |
