@@ -1,0 +1,900 @@
+{
+ "prereg_sha256": "6755bb72b2413bf78f534048c40d917d264e8565837e41f18b4a51ec164b5e4b",
+ "prereg_lock_ok": true,
+ "p_bar": 0.0008333333333333334,
+ "datos_hasta": "2026-11-04 01:15:00+00:00",
+ "train": {
+  "H4_B_T50": {
+   "n": 4793,
+   "ganadoras_pct": 61.88,
+   "p_una_cola": 0.5825,
+   "profit_factor": 0.993,
+   "compras": 2291,
+   "ventas": 2502,
+   "minutos_ganadoras_mediana": 45,
+   "media_R": -0.0027,
+   "ic95_R": [
+    -0.0301,
+    0.0237
+   ],
+   "moneda_pct": 62.24,
+   "media_pct_precio": -0.0004,
+   "salidas": {
+    "tp": 2980,
+    "sl": 1794,
+    "tiempo": 19
+   },
+   "aprueba": false
+  },
+  "H4_B_TOP": {
+   "n": 5930,
+   "ganadoras_pct": 44.06,
+   "p_una_cola": 0.936,
+   "profit_factor": 0.958,
+   "compras": 2913,
+   "ventas": 3017,
+   "minutos_ganadoras_mediana": 210,
+   "media_R": -0.0238,
+   "ic95_R": [
+    -0.0554,
+    0.0067
+   ],
+   "moneda_pct": 44.06,
+   "media_pct_precio": -0.0123,
+   "salidas": {
+    "tp": 2533,
+    "sl": 3280,
+    "tiempo": 117
+   },
+   "aprueba": false
+  },
+  "H4_C50_T50": {
+   "n": 4793,
+   "ganadoras_pct": 61.88,
+   "p_una_cola": 0.5825,
+   "profit_factor": 0.993,
+   "compras": 2291,
+   "ventas": 2502,
+   "minutos_ganadoras_mediana": 45,
+   "media_R": -0.0027,
+   "ic95_R": [
+    -0.0301,
+    0.0237
+   ],
+   "moneda_pct": 62.24,
+   "media_pct_precio": -0.0004,
+   "salidas": {
+    "tp": 2980,
+    "sl": 1794,
+    "tiempo": 19
+   },
+   "aprueba": false
+  },
+  "H4_C50_TOP": {
+   "n": 4793,
+   "ganadoras_pct": 38.24,
+   "p_una_cola": 0.843,
+   "profit_factor": 0.967,
+   "compras": 2291,
+   "ventas": 2502,
+   "minutos_ganadoras_mediana": 270,
+   "media_R": -0.0206,
+   "ic95_R": [
+    -0.0584,
+    0.0169
+   ],
+   "moneda_pct": 37.71,
+   "media_pct_precio": -0.0095,
+   "salidas": {
+    "tp": 1755,
+    "sl": 2930,
+    "tiempo": 108
+   },
+   "aprueba": false
+  },
+  "H4_P50_T50": {
+   "n": 1631,
+   "ganadoras_pct": 53.03,
+   "p_una_cola": 0.926,
+   "profit_factor": 0.917,
+   "compras": 744,
+   "ventas": 887,
+   "minutos_ganadoras_mediana": 105,
+   "media_R": -0.0389,
+   "ic95_R": [
+    -0.0889,
+    0.0121
+   ],
+   "moneda_pct": 54.57,
+   "media_pct_precio": -0.0314,
+   "salidas": {
+    "tp": 855,
+    "sl": 760,
+    "tiempo": 16
+   },
+   "aprueba": false
+  },
+  "H4_P50_TOP": {
+   "n": 1631,
+   "ganadoras_pct": 32.07,
+   "p_una_cola": 0.9885,
+   "profit_factor": 0.872,
+   "compras": 744,
+   "ventas": 887,
+   "minutos_ganadoras_mediana": 525,
+   "media_R": -0.087,
+   "ic95_R": [
+    -0.1604,
+    -0.0133
+   ],
+   "moneda_pct": 32.9,
+   "media_pct_precio": -0.0654,
+   "salidas": {
+    "tp": 466,
+    "sl": 1091,
+    "tiempo": 74
+   },
+   "aprueba": false
+  },
+  "D1_B_T50": {
+   "n": 717,
+   "ganadoras_pct": 59.0,
+   "p_una_cola": 0.843,
+   "profit_factor": 0.914,
+   "compras": 346,
+   "ventas": 371,
+   "minutos_ganadoras_mediana": 420,
+   "media_R": -0.0354,
+   "ic95_R": [
+    -0.1047,
+    0.0358
+   ],
+   "moneda_pct": 60.45,
+   "media_pct_precio": -0.1374,
+   "salidas": {
+    "tp": 423,
+    "sl": 294,
+    "tiempo": 0
+   },
+   "aprueba": false
+  },
+  "D1_B_TOP": {
+   "n": 876,
+   "ganadoras_pct": 42.92,
+   "p_una_cola": 0.5555,
+   "profit_factor": 0.986,
+   "compras": 430,
+   "ventas": 446,
+   "minutos_ganadoras_mediana": 1088,
+   "media_R": -0.008,
+   "ic95_R": [
+    -0.094,
+    0.0871
+   ],
+   "moneda_pct": 42.85,
+   "media_pct_precio": -0.1367,
+   "salidas": {
+    "tp": 373,
+    "sl": 497,
+    "tiempo": 6
+   },
+   "aprueba": false
+  },
+  "D1_C50_T50": {
+   "n": 717,
+   "ganadoras_pct": 59.0,
+   "p_una_cola": 0.843,
+   "profit_factor": 0.914,
+   "compras": 346,
+   "ventas": 371,
+   "minutos_ganadoras_mediana": 420,
+   "media_R": -0.0354,
+   "ic95_R": [
+    -0.1047,
+    0.0358
+   ],
+   "moneda_pct": 60.45,
+   "media_pct_precio": -0.1374,
+   "salidas": {
+    "tp": 423,
+    "sl": 294,
+    "tiempo": 0
+   },
+   "aprueba": false
+  },
+  "D1_C50_TOP": {
+   "n": 717,
+   "ganadoras_pct": 36.54,
+   "p_una_cola": 0.583,
+   "profit_factor": 0.983,
+   "compras": 346,
+   "ventas": 371,
+   "minutos_ganadoras_mediana": 1493,
+   "media_R": -0.0111,
+   "ic95_R": [
+    -0.1198,
+    0.0989
+   ],
+   "moneda_pct": 36.65,
+   "media_pct_precio": -0.1182,
+   "salidas": {
+    "tp": 259,
+    "sl": 452,
+    "tiempo": 6
+   },
+   "aprueba": false
+  },
+  "D1_P50_T50": {
+   "n": 260,
+   "ganadoras_pct": 48.46,
+   "p_una_cola": 0.794,
+   "profit_factor": 0.891,
+   "compras": 118,
+   "ventas": 142,
+   "minutos_ganadoras_mediana": 832,
+   "media_R": -0.0566,
+   "ic95_R": [
+    -0.1856,
+    0.0827
+   ],
+   "moneda_pct": 51.86,
+   "media_pct_precio": -0.3806,
+   "salidas": {
+    "tp": 126,
+    "sl": 134,
+    "tiempo": 0
+   },
+   "aprueba": false
+  },
+  "D1_P50_TOP": {
+   "n": 260,
+   "ganadoras_pct": 31.92,
+   "p_una_cola": 0.426,
+   "profit_factor": 1.032,
+   "compras": 118,
+   "ventas": 142,
+   "minutos_ganadoras_mediana": 2955,
+   "media_R": 0.0221,
+   "ic95_R": [
+    -0.1781,
+    0.228
+   ],
+   "moneda_pct": 30.85,
+   "media_pct_precio": -0.1929,
+   "salidas": {
+    "tp": 81,
+    "sl": 175,
+    "tiempo": 4
+   },
+   "aprueba": false
+  }
+ },
+ "diagnosticos_train": {
+  "H4_B_T50": {
+   "sin_costos_media_R": 0.0151,
+   "sin_costos_ic95_R": [
+    -0.0123,
+    0.0414
+   ],
+   "sin_costos_ganadoras_pct": 62.84,
+   "lado_invertido_sin_costos_media_R": -0.03,
+   "spread_x2_media_R": -0.0193,
+   "compras": {
+    "n": 2291,
+    "ganadoras_pct": 64.25,
+    "p_una_cola": 0.633,
+    "profit_factor": 0.98,
+    "compras": 2291,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 45,
+    "media_R": -0.007,
+    "ic95_R": [
+     -0.0426,
+     0.0291
+    ],
+    "moneda_pct": 64.8,
+    "media_pct_precio": 0.0029,
+    "salidas": {
+     "tp": 1488,
+     "sl": 791,
+     "tiempo": 12
+    }
+   },
+   "ventas": {
+    "n": 2502,
+    "ganadoras_pct": 59.71,
+    "p_una_cola": 0.4585,
+    "profit_factor": 1.003,
+    "compras": 0,
+    "ventas": 2502,
+    "minutos_ganadoras_mediana": 45,
+    "media_R": 0.0013,
+    "ic95_R": [
+     -0.0384,
+     0.0405
+    ],
+    "moneda_pct": 59.9,
+    "media_pct_precio": -0.0033,
+    "salidas": {
+     "tp": 1492,
+     "sl": 1003,
+     "tiempo": 7
+    }
+   }
+  },
+  "H4_B_TOP": {
+   "sin_costos_media_R": -0.0058,
+   "sin_costos_ic95_R": [
+    -0.0371,
+    0.0252
+   ],
+   "sin_costos_ganadoras_pct": 44.4,
+   "lado_invertido_sin_costos_media_R": -0.0066,
+   "spread_x2_media_R": -0.0363,
+   "compras": {
+    "n": 2913,
+    "ganadoras_pct": 47.1,
+    "p_una_cola": 0.741,
+    "profit_factor": 0.972,
+    "compras": 2913,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 225,
+    "media_R": -0.015,
+    "ic95_R": [
+     -0.0619,
+     0.0306
+    ],
+    "moneda_pct": 46.46,
+    "media_pct_precio": 0.0031,
+    "salidas": {
+     "tp": 1318,
+     "sl": 1518,
+     "tiempo": 77
+    }
+   },
+   "ventas": {
+    "n": 3017,
+    "ganadoras_pct": 41.13,
+    "p_una_cola": 0.8725,
+    "profit_factor": 0.945,
+    "compras": 0,
+    "ventas": 3017,
+    "minutos_ganadoras_mediana": 195,
+    "media_R": -0.0324,
+    "ic95_R": [
+     -0.083,
+     0.0203
+    ],
+    "moneda_pct": 41.75,
+    "media_pct_precio": -0.0272,
+    "salidas": {
+     "tp": 1215,
+     "sl": 1762,
+     "tiempo": 40
+    }
+   }
+  },
+  "H4_C50_T50": {
+   "sin_costos_media_R": 0.0151,
+   "sin_costos_ic95_R": [
+    -0.0123,
+    0.0414
+   ],
+   "sin_costos_ganadoras_pct": 62.84,
+   "lado_invertido_sin_costos_media_R": -0.03,
+   "spread_x2_media_R": -0.0193,
+   "compras": {
+    "n": 2291,
+    "ganadoras_pct": 64.25,
+    "p_una_cola": 0.633,
+    "profit_factor": 0.98,
+    "compras": 2291,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 45,
+    "media_R": -0.007,
+    "ic95_R": [
+     -0.0426,
+     0.0291
+    ],
+    "moneda_pct": 64.8,
+    "media_pct_precio": 0.0029,
+    "salidas": {
+     "tp": 1488,
+     "sl": 791,
+     "tiempo": 12
+    }
+   },
+   "ventas": {
+    "n": 2502,
+    "ganadoras_pct": 59.71,
+    "p_una_cola": 0.4585,
+    "profit_factor": 1.003,
+    "compras": 0,
+    "ventas": 2502,
+    "minutos_ganadoras_mediana": 45,
+    "media_R": 0.0013,
+    "ic95_R": [
+     -0.0384,
+     0.0405
+    ],
+    "moneda_pct": 59.9,
+    "media_pct_precio": -0.0033,
+    "salidas": {
+     "tp": 1492,
+     "sl": 1003,
+     "tiempo": 7
+    }
+   }
+  },
+  "H4_C50_TOP": {
+   "sin_costos_media_R": -0.0014,
+   "sin_costos_ic95_R": [
+    -0.039,
+    0.0363
+   ],
+   "sin_costos_ganadoras_pct": 38.56,
+   "lado_invertido_sin_costos_media_R": -0.0158,
+   "spread_x2_media_R": -0.0345,
+   "compras": {
+    "n": 2291,
+    "ganadoras_pct": 40.77,
+    "p_una_cola": 0.6705,
+    "profit_factor": 0.978,
+    "compras": 2291,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 300,
+    "media_R": -0.0133,
+    "ic95_R": [
+     -0.0693,
+     0.0492
+    ],
+    "moneda_pct": 39.69,
+    "media_pct_precio": 0.006,
+    "salidas": {
+     "tp": 882,
+     "sl": 1339,
+     "tiempo": 70
+    }
+   },
+   "ventas": {
+    "n": 2502,
+    "ganadoras_pct": 35.93,
+    "p_una_cola": 0.7975,
+    "profit_factor": 0.957,
+    "compras": 0,
+    "ventas": 2502,
+    "minutos_ganadoras_mediana": 255,
+    "media_R": -0.0272,
+    "ic95_R": [
+     -0.0867,
+     0.0336
+    ],
+    "moneda_pct": 35.89,
+    "media_pct_precio": -0.0237,
+    "salidas": {
+     "tp": 873,
+     "sl": 1591,
+     "tiempo": 38
+    }
+   }
+  },
+  "H4_P50_T50": {
+   "sin_costos_media_R": -0.0204,
+   "sin_costos_ic95_R": [
+    -0.0699,
+    0.0313
+   ],
+   "sin_costos_ganadoras_pct": 53.46,
+   "lado_invertido_sin_costos_media_R": 0.0341,
+   "spread_x2_media_R": -0.0529,
+   "compras": {
+    "n": 744,
+    "ganadoras_pct": 57.8,
+    "p_una_cola": 0.6695,
+    "profit_factor": 0.962,
+    "compras": 744,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 120,
+    "media_R": -0.0163,
+    "ic95_R": [
+     -0.0904,
+     0.0589
+    ],
+    "moneda_pct": 57.93,
+    "media_pct_precio": -0.0156,
+    "salidas": {
+     "tp": 422,
+     "sl": 312,
+     "tiempo": 10
+    }
+   },
+   "ventas": {
+    "n": 887,
+    "ganadoras_pct": 49.04,
+    "p_una_cola": 0.933,
+    "profit_factor": 0.886,
+    "compras": 0,
+    "ventas": 887,
+    "minutos_ganadoras_mediana": 105,
+    "media_R": -0.0579,
+    "ic95_R": [
+     -0.1321,
+     0.0165
+    ],
+    "moneda_pct": 51.76,
+    "media_pct_precio": -0.0448,
+    "salidas": {
+     "tp": 433,
+     "sl": 448,
+     "tiempo": 6
+    }
+   }
+  },
+  "H4_P50_TOP": {
+   "sin_costos_media_R": -0.0732,
+   "sin_costos_ic95_R": [
+    -0.1469,
+    0.0005
+   ],
+   "sin_costos_ganadoras_pct": 32.25,
+   "lado_invertido_sin_costos_media_R": 0.0264,
+   "spread_x2_media_R": -0.0975,
+   "compras": {
+    "n": 744,
+    "ganadoras_pct": 36.69,
+    "p_una_cola": 0.744,
+    "profit_factor": 0.944,
+    "compras": 744,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 600,
+    "media_R": -0.0356,
+    "ic95_R": [
+     -0.1396,
+     0.0782
+    ],
+    "moneda_pct": 35.46,
+    "media_pct_precio": -0.0133,
+    "salidas": {
+     "tp": 233,
+     "sl": 461,
+     "tiempo": 50
+    }
+   },
+   "ventas": {
+    "n": 887,
+    "ganadoras_pct": 28.18,
+    "p_una_cola": 0.993,
+    "profit_factor": 0.818,
+    "compras": 0,
+    "ventas": 887,
+    "minutos_ganadoras_mediana": 442,
+    "media_R": -0.13,
+    "ic95_R": [
+     -0.2325,
+     -0.0268
+    ],
+    "moneda_pct": 30.76,
+    "media_pct_precio": -0.109,
+    "salidas": {
+     "tp": 233,
+     "sl": 630,
+     "tiempo": 24
+    }
+   }
+  },
+  "D1_B_T50": {
+   "sin_costos_media_R": -0.0286,
+   "sin_costos_ic95_R": [
+    -0.0974,
+    0.0427
+   ],
+   "sin_costos_ganadoras_pct": 59.0,
+   "lado_invertido_sin_costos_media_R": 0.0548,
+   "spread_x2_media_R": -0.0397,
+   "compras": {
+    "n": 346,
+    "ganadoras_pct": 60.98,
+    "p_una_cola": 0.819,
+    "profit_factor": 0.885,
+    "compras": 346,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 465,
+    "media_R": -0.0457,
+    "ic95_R": [
+     -0.138,
+     0.0578
+    ],
+    "moneda_pct": 62.6,
+    "media_pct_precio": -0.108,
+    "salidas": {
+     "tp": 211,
+     "sl": 135,
+     "tiempo": 0
+    }
+   },
+   "ventas": {
+    "n": 371,
+    "ganadoras_pct": 57.14,
+    "p_una_cola": 0.6965,
+    "profit_factor": 0.94,
+    "compras": 0,
+    "ventas": 371,
+    "minutos_ganadoras_mediana": 382,
+    "media_R": -0.0257,
+    "ic95_R": [
+     -0.1264,
+     0.0803
+    ],
+    "moneda_pct": 58.44,
+    "media_pct_precio": -0.1649,
+    "salidas": {
+     "tp": 212,
+     "sl": 159,
+     "tiempo": 0
+    }
+   }
+  },
+  "D1_B_TOP": {
+   "sin_costos_media_R": 0.0021,
+   "sin_costos_ic95_R": [
+    -0.0842,
+    0.0973
+   ],
+   "sin_costos_ganadoras_pct": 42.92,
+   "lado_invertido_sin_costos_media_R": -0.0028,
+   "spread_x2_media_R": -0.0104,
+   "compras": {
+    "n": 430,
+    "ganadoras_pct": 44.88,
+    "p_una_cola": 0.56,
+    "profit_factor": 0.988,
+    "compras": 430,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 1215,
+    "media_R": -0.0069,
+    "ic95_R": [
+     -0.1315,
+     0.1233
+    ],
+    "moneda_pct": 44.67,
+    "media_pct_precio": -0.1492,
+    "salidas": {
+     "tp": 191,
+     "sl": 236,
+     "tiempo": 3
+    }
+   },
+   "ventas": {
+    "n": 446,
+    "ganadoras_pct": 41.03,
+    "p_una_cola": 0.5745,
+    "profit_factor": 0.985,
+    "compras": 0,
+    "ventas": 446,
+    "minutos_ganadoras_mediana": 1035,
+    "media_R": -0.009,
+    "ic95_R": [
+     -0.1376,
+     0.1217
+    ],
+    "moneda_pct": 41.09,
+    "media_pct_precio": -0.1246,
+    "salidas": {
+     "tp": 182,
+     "sl": 261,
+     "tiempo": 3
+    }
+   }
+  },
+  "D1_C50_T50": {
+   "sin_costos_media_R": -0.0286,
+   "sin_costos_ic95_R": [
+    -0.0974,
+    0.0427
+   ],
+   "sin_costos_ganadoras_pct": 59.0,
+   "lado_invertido_sin_costos_media_R": 0.0548,
+   "spread_x2_media_R": -0.0397,
+   "compras": {
+    "n": 346,
+    "ganadoras_pct": 60.98,
+    "p_una_cola": 0.819,
+    "profit_factor": 0.885,
+    "compras": 346,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 465,
+    "media_R": -0.0457,
+    "ic95_R": [
+     -0.138,
+     0.0578
+    ],
+    "moneda_pct": 62.6,
+    "media_pct_precio": -0.108,
+    "salidas": {
+     "tp": 211,
+     "sl": 135,
+     "tiempo": 0
+    }
+   },
+   "ventas": {
+    "n": 371,
+    "ganadoras_pct": 57.14,
+    "p_una_cola": 0.6965,
+    "profit_factor": 0.94,
+    "compras": 0,
+    "ventas": 371,
+    "minutos_ganadoras_mediana": 382,
+    "media_R": -0.0257,
+    "ic95_R": [
+     -0.1264,
+     0.0803
+    ],
+    "moneda_pct": 58.44,
+    "media_pct_precio": -0.1649,
+    "salidas": {
+     "tp": 212,
+     "sl": 159,
+     "tiempo": 0
+    }
+   }
+  },
+  "D1_C50_TOP": {
+   "sin_costos_media_R": 0.0001,
+   "sin_costos_ic95_R": [
+    -0.109,
+    0.1098
+   ],
+   "sin_costos_ganadoras_pct": 36.54,
+   "lado_invertido_sin_costos_media_R": 0.0179,
+   "spread_x2_media_R": -0.0138,
+   "compras": {
+    "n": 346,
+    "ganadoras_pct": 37.86,
+    "p_una_cola": 0.582,
+    "profit_factor": 0.973,
+    "compras": 346,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 1695,
+    "media_R": -0.0171,
+    "ic95_R": [
+     -0.161,
+     0.1443
+    ],
+    "moneda_pct": 38.4,
+    "media_pct_precio": -0.1796,
+    "salidas": {
+     "tp": 129,
+     "sl": 214,
+     "tiempo": 3
+    }
+   },
+   "ventas": {
+    "n": 371,
+    "ganadoras_pct": 35.31,
+    "p_una_cola": 0.5285,
+    "profit_factor": 0.991,
+    "compras": 0,
+    "ventas": 371,
+    "minutos_ganadoras_mediana": 1245,
+    "media_R": -0.0056,
+    "ic95_R": [
+     -0.1607,
+     0.1515
+    ],
+    "moneda_pct": 35.02,
+    "media_pct_precio": -0.0609,
+    "salidas": {
+     "tp": 130,
+     "sl": 238,
+     "tiempo": 3
+    }
+   }
+  },
+  "D1_P50_T50": {
+   "sin_costos_media_R": -0.049,
+   "sin_costos_ic95_R": [
+    -0.1782,
+    0.0899
+   ],
+   "sin_costos_ganadoras_pct": 48.46,
+   "lado_invertido_sin_costos_media_R": 0.1665,
+   "spread_x2_media_R": -0.0587,
+   "compras": {
+    "n": 118,
+    "ganadoras_pct": 51.69,
+    "p_una_cola": 0.916,
+    "profit_factor": 0.754,
+    "compras": 118,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 810,
+    "media_R": -0.1212,
+    "ic95_R": [
+     -0.2899,
+     0.0549
+    ],
+    "moneda_pct": 56.02,
+    "media_pct_precio": -0.3463,
+    "salidas": {
+     "tp": 61,
+     "sl": 57,
+     "tiempo": 0
+    }
+   },
+   "ventas": {
+    "n": 142,
+    "ganadoras_pct": 45.77,
+    "p_una_cola": 0.519,
+    "profit_factor": 0.995,
+    "compras": 0,
+    "ventas": 142,
+    "minutos_ganadoras_mediana": 855,
+    "media_R": -0.0029,
+    "ic95_R": [
+     -0.1975,
+     0.2076
+    ],
+    "moneda_pct": 48.41,
+    "media_pct_precio": -0.4092,
+    "salidas": {
+     "tp": 65,
+     "sl": 77,
+     "tiempo": 0
+    }
+   }
+  },
+  "D1_P50_TOP": {
+   "sin_costos_media_R": 0.034,
+   "sin_costos_ic95_R": [
+    -0.1645,
+    0.2406
+   ],
+   "sin_costos_ganadoras_pct": 31.92,
+   "lado_invertido_sin_costos_media_R": -0.002,
+   "spread_x2_media_R": 0.0199,
+   "compras": {
+    "n": 118,
+    "ganadoras_pct": 35.59,
+    "p_una_cola": 0.4715,
+    "profit_factor": 1.019,
+    "compras": 118,
+    "ventas": 0,
+    "minutos_ganadoras_mediana": 3255,
+    "media_R": 0.0127,
+    "ic95_R": [
+     -0.2589,
+     0.2924
+    ],
+    "moneda_pct": 33.64,
+    "media_pct_precio": -0.0826,
+    "salidas": {
+     "tp": 41,
+     "sl": 76,
+     "tiempo": 1
+    }
+   },
+   "ventas": {
+    "n": 142,
+    "ganadoras_pct": 28.87,
+    "p_una_cola": 0.4345,
+    "profit_factor": 1.043,
+    "compras": 0,
+    "ventas": 142,
+    "minutos_ganadoras_mediana": 2700,
+    "media_R": 0.0298,
+    "ic95_R": [
+     -0.2611,
+     0.3392
+    ],
+    "moneda_pct": 28.53,
+    "media_pct_precio": -0.2845,
+    "salidas": {
+     "tp": 40,
+     "sl": 99,
+     "tiempo": 3
+    }
+   }
+  }
+ },
+ "aprobaron_train": [],
+ "holdout": "sin abrir: ninguna celda aprob\u00f3 el train"
+}
